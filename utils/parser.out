@@ -1,0 +1,358 @@
+Created by PLY version 3.10 (http://www.dabeaz.com/ply)
+
+Unused terminals:
+
+    PLUS
+    MINUS
+    TIMES
+    DIVIDE
+
+Grammar
+
+Rule 0     S' -> entrylist
+Rule 1     dict_name -> dict_name DOT NAME
+Rule 2     dict_name -> NAME
+Rule 3     entrylist -> entry
+Rule 4     entrylist -> entrylist COMMA entry
+Rule 5     entry -> dict_name EQUALS value
+Rule 6     value -> NUMBER
+Rule 7     value -> STRING
+Rule 8     value -> list
+Rule 9     value -> tuple
+Rule 10    list -> LSQPAR vararglist RSQPAR
+Rule 11    list -> LSQPAR RSQPAR
+Rule 12    tuple -> LPAR vararglist RPAR
+Rule 13    tuple -> LPAR RPAR
+Rule 14    vararglist -> vararglist COMMA value
+Rule 15    vararglist -> value
+
+Terminals, with rules where they appear
+
+COMMA                : 4 14
+DIVIDE               : 
+DOT                  : 1
+EQUALS               : 5
+LPAR                 : 12 13
+LSQPAR               : 10 11
+MINUS                : 
+NAME                 : 1 2
+NUMBER               : 6
+PLUS                 : 
+RPAR                 : 12 13
+RSQPAR               : 10 11
+STRING               : 7
+TIMES                : 
+error                : 
+
+Nonterminals, with rules where they appear
+
+dict_name            : 1 5
+entry                : 3 4
+entrylist            : 4 0
+list                 : 8
+tuple                : 9
+value                : 5 14 15
+vararglist           : 10 12 14
+
+Parsing method: LALR
+
+state 0
+
+    (0) S' -> . entrylist
+    (3) entrylist -> . entry
+    (4) entrylist -> . entrylist COMMA entry
+    (5) entry -> . dict_name EQUALS value
+    (1) dict_name -> . dict_name DOT NAME
+    (2) dict_name -> . NAME
+
+    NAME            shift and go to state 4
+
+    entrylist                      shift and go to state 1
+    entry                          shift and go to state 2
+    dict_name                      shift and go to state 3
+
+state 1
+
+    (0) S' -> entrylist .
+    (4) entrylist -> entrylist . COMMA entry
+
+    COMMA           shift and go to state 5
+
+
+state 2
+
+    (3) entrylist -> entry .
+
+    COMMA           reduce using rule 3 (entrylist -> entry .)
+    $end            reduce using rule 3 (entrylist -> entry .)
+
+
+state 3
+
+    (5) entry -> dict_name . EQUALS value
+    (1) dict_name -> dict_name . DOT NAME
+
+    EQUALS          shift and go to state 6
+    DOT             shift and go to state 7
+
+
+state 4
+
+    (2) dict_name -> NAME .
+
+    EQUALS          reduce using rule 2 (dict_name -> NAME .)
+    DOT             reduce using rule 2 (dict_name -> NAME .)
+
+
+state 5
+
+    (4) entrylist -> entrylist COMMA . entry
+    (5) entry -> . dict_name EQUALS value
+    (1) dict_name -> . dict_name DOT NAME
+    (2) dict_name -> . NAME
+
+    NAME            shift and go to state 4
+
+    entry                          shift and go to state 8
+    dict_name                      shift and go to state 3
+
+state 6
+
+    (5) entry -> dict_name EQUALS . value
+    (6) value -> . NUMBER
+    (7) value -> . STRING
+    (8) value -> . list
+    (9) value -> . tuple
+    (10) list -> . LSQPAR vararglist RSQPAR
+    (11) list -> . LSQPAR RSQPAR
+    (12) tuple -> . LPAR vararglist RPAR
+    (13) tuple -> . LPAR RPAR
+
+    NUMBER          shift and go to state 10
+    STRING          shift and go to state 11
+    LSQPAR          shift and go to state 14
+    LPAR            shift and go to state 15
+
+    value                          shift and go to state 9
+    list                           shift and go to state 12
+    tuple                          shift and go to state 13
+
+state 7
+
+    (1) dict_name -> dict_name DOT . NAME
+
+    NAME            shift and go to state 16
+
+
+state 8
+
+    (4) entrylist -> entrylist COMMA entry .
+
+    COMMA           reduce using rule 4 (entrylist -> entrylist COMMA entry .)
+    $end            reduce using rule 4 (entrylist -> entrylist COMMA entry .)
+
+
+state 9
+
+    (5) entry -> dict_name EQUALS value .
+
+    COMMA           reduce using rule 5 (entry -> dict_name EQUALS value .)
+    $end            reduce using rule 5 (entry -> dict_name EQUALS value .)
+
+
+state 10
+
+    (6) value -> NUMBER .
+
+    COMMA           reduce using rule 6 (value -> NUMBER .)
+    $end            reduce using rule 6 (value -> NUMBER .)
+    RSQPAR          reduce using rule 6 (value -> NUMBER .)
+    RPAR            reduce using rule 6 (value -> NUMBER .)
+
+
+state 11
+
+    (7) value -> STRING .
+
+    COMMA           reduce using rule 7 (value -> STRING .)
+    $end            reduce using rule 7 (value -> STRING .)
+    RSQPAR          reduce using rule 7 (value -> STRING .)
+    RPAR            reduce using rule 7 (value -> STRING .)
+
+
+state 12
+
+    (8) value -> list .
+
+    COMMA           reduce using rule 8 (value -> list .)
+    $end            reduce using rule 8 (value -> list .)
+    RSQPAR          reduce using rule 8 (value -> list .)
+    RPAR            reduce using rule 8 (value -> list .)
+
+
+state 13
+
+    (9) value -> tuple .
+
+    COMMA           reduce using rule 9 (value -> tuple .)
+    $end            reduce using rule 9 (value -> tuple .)
+    RSQPAR          reduce using rule 9 (value -> tuple .)
+    RPAR            reduce using rule 9 (value -> tuple .)
+
+
+state 14
+
+    (10) list -> LSQPAR . vararglist RSQPAR
+    (11) list -> LSQPAR . RSQPAR
+    (14) vararglist -> . vararglist COMMA value
+    (15) vararglist -> . value
+    (6) value -> . NUMBER
+    (7) value -> . STRING
+    (8) value -> . list
+    (9) value -> . tuple
+    (10) list -> . LSQPAR vararglist RSQPAR
+    (11) list -> . LSQPAR RSQPAR
+    (12) tuple -> . LPAR vararglist RPAR
+    (13) tuple -> . LPAR RPAR
+
+    RSQPAR          shift and go to state 18
+    NUMBER          shift and go to state 10
+    STRING          shift and go to state 11
+    LSQPAR          shift and go to state 14
+    LPAR            shift and go to state 15
+
+    vararglist                     shift and go to state 17
+    value                          shift and go to state 19
+    list                           shift and go to state 12
+    tuple                          shift and go to state 13
+
+state 15
+
+    (12) tuple -> LPAR . vararglist RPAR
+    (13) tuple -> LPAR . RPAR
+    (14) vararglist -> . vararglist COMMA value
+    (15) vararglist -> . value
+    (6) value -> . NUMBER
+    (7) value -> . STRING
+    (8) value -> . list
+    (9) value -> . tuple
+    (10) list -> . LSQPAR vararglist RSQPAR
+    (11) list -> . LSQPAR RSQPAR
+    (12) tuple -> . LPAR vararglist RPAR
+    (13) tuple -> . LPAR RPAR
+
+    RPAR            shift and go to state 21
+    NUMBER          shift and go to state 10
+    STRING          shift and go to state 11
+    LSQPAR          shift and go to state 14
+    LPAR            shift and go to state 15
+
+    vararglist                     shift and go to state 20
+    value                          shift and go to state 19
+    list                           shift and go to state 12
+    tuple                          shift and go to state 13
+
+state 16
+
+    (1) dict_name -> dict_name DOT NAME .
+
+    EQUALS          reduce using rule 1 (dict_name -> dict_name DOT NAME .)
+    DOT             reduce using rule 1 (dict_name -> dict_name DOT NAME .)
+
+
+state 17
+
+    (10) list -> LSQPAR vararglist . RSQPAR
+    (14) vararglist -> vararglist . COMMA value
+
+    RSQPAR          shift and go to state 22
+    COMMA           shift and go to state 23
+
+
+state 18
+
+    (11) list -> LSQPAR RSQPAR .
+
+    COMMA           reduce using rule 11 (list -> LSQPAR RSQPAR .)
+    $end            reduce using rule 11 (list -> LSQPAR RSQPAR .)
+    RSQPAR          reduce using rule 11 (list -> LSQPAR RSQPAR .)
+    RPAR            reduce using rule 11 (list -> LSQPAR RSQPAR .)
+
+
+state 19
+
+    (15) vararglist -> value .
+
+    RSQPAR          reduce using rule 15 (vararglist -> value .)
+    COMMA           reduce using rule 15 (vararglist -> value .)
+    RPAR            reduce using rule 15 (vararglist -> value .)
+
+
+state 20
+
+    (12) tuple -> LPAR vararglist . RPAR
+    (14) vararglist -> vararglist . COMMA value
+
+    RPAR            shift and go to state 24
+    COMMA           shift and go to state 23
+
+
+state 21
+
+    (13) tuple -> LPAR RPAR .
+
+    COMMA           reduce using rule 13 (tuple -> LPAR RPAR .)
+    $end            reduce using rule 13 (tuple -> LPAR RPAR .)
+    RSQPAR          reduce using rule 13 (tuple -> LPAR RPAR .)
+    RPAR            reduce using rule 13 (tuple -> LPAR RPAR .)
+
+
+state 22
+
+    (10) list -> LSQPAR vararglist RSQPAR .
+
+    COMMA           reduce using rule 10 (list -> LSQPAR vararglist RSQPAR .)
+    $end            reduce using rule 10 (list -> LSQPAR vararglist RSQPAR .)
+    RSQPAR          reduce using rule 10 (list -> LSQPAR vararglist RSQPAR .)
+    RPAR            reduce using rule 10 (list -> LSQPAR vararglist RSQPAR .)
+
+
+state 23
+
+    (14) vararglist -> vararglist COMMA . value
+    (6) value -> . NUMBER
+    (7) value -> . STRING
+    (8) value -> . list
+    (9) value -> . tuple
+    (10) list -> . LSQPAR vararglist RSQPAR
+    (11) list -> . LSQPAR RSQPAR
+    (12) tuple -> . LPAR vararglist RPAR
+    (13) tuple -> . LPAR RPAR
+
+    NUMBER          shift and go to state 10
+    STRING          shift and go to state 11
+    LSQPAR          shift and go to state 14
+    LPAR            shift and go to state 15
+
+    value                          shift and go to state 25
+    list                           shift and go to state 12
+    tuple                          shift and go to state 13
+
+state 24
+
+    (12) tuple -> LPAR vararglist RPAR .
+
+    COMMA           reduce using rule 12 (tuple -> LPAR vararglist RPAR .)
+    $end            reduce using rule 12 (tuple -> LPAR vararglist RPAR .)
+    RSQPAR          reduce using rule 12 (tuple -> LPAR vararglist RPAR .)
+    RPAR            reduce using rule 12 (tuple -> LPAR vararglist RPAR .)
+
+
+state 25
+
+    (14) vararglist -> vararglist COMMA value .
+
+    RSQPAR          reduce using rule 14 (vararglist -> vararglist COMMA value .)
+    COMMA           reduce using rule 14 (vararglist -> vararglist COMMA value .)
+    RPAR            reduce using rule 14 (vararglist -> vararglist COMMA value .)
+
