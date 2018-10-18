@@ -4,9 +4,9 @@ import socket
 
 class Connection(sock.Sock):
 
-  def __init__(self, host, port):
+  def __init__(self, host, port, **kwargs):
     self.conn = (host, port)
-    super().__init__()
+    super().__init__(**kwargs)
 
   def _connect(self):
     s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)

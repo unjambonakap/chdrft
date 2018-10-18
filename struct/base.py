@@ -158,7 +158,7 @@ class Intervals:
         xl = [xl]
 
     for x in xl:
-      self.add(elem)
+      self.add(x)
     glog.debug('Intervals >> %s', self.xl)
 
   def add(self, elem):

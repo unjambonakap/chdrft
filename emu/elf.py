@@ -7,7 +7,7 @@ from elftools.elf.constants import P_FLAGS
 
 from chdrft.utils.misc import Dict, Attributize, opa_print, to_list, align
 import chdrft.utils.misc as cmisc
-#from chdrft.emu.structures import StructureReader
+from chdrft.emu.structures import Structure
 from chdrft.struct.base import Range1D
 
 MEM_FLAGS = P_FLAGS
@@ -26,8 +26,9 @@ class ElfUtils:
   def __del__(self):
     self.file.close()
 
-  def __init__(self, filename=None, iobase=None, data=None, offset=0, load_sym=True, core=False):
+  def __init__(self, filename=None, iobase=None, data=None, offset=0, load_sym=True, core=None):
 
+    self.filename = filename
     self.core = core
     self.raw = None
     if iobase is not None:
@@ -55,6 +56,9 @@ class ElfUtils:
 
     self.elf = EF.ELFFile(self.file)
     elf = self.elf
+
+    if core is None:
+      self.core = elf.header.e_type == 'ET_CORE'
     self.arch_str = self.elf.get_machine_arch()
     from chdrft.emu.binary import guess_arch
     self.arch = guess_arch(self.arch_str)
@@ -65,13 +69,13 @@ class ElfUtils:
         #print(sym.name, hex(sym['st_value']))
         self.dyn_symbols[sym.name] = sym['st_value']
 
-    for rel in (b'.rela.plt', b'.rel.plt'):
-      rel_section = elf.get_section_by_name(rel)
-      if not isinstance(rel_section, RelocationSection):
+    for rel in ('.rela.plt', '.rel.plt'):
+      rel_section = self.get_section(rel)
+      if not rel_section or not isinstance(rel_section.raw, RelocationSection):
         continue
       sym_tab = elf.get_section(rel_section['sh_link'])
 
-      for rel in rel_section.iter_relocations():
+      for rel in rel_section.raw.iter_relocations():
         sym = sym_tab.get_symbol(rel['r_info_sym'])
         off = rel['r_offset']
         self.relocs[sym.name] = off
@@ -110,24 +114,24 @@ class ElfUtils:
         orig = self.get_seg_content(seg)
         note.data = orig[st:nd]
 
+        from chdrft.emu.code_db import code
         if self.core:
 
-          from chdrft.emu.code_db import code
           #print(code.g_code.cats.elf.NT_GNU_.values())
           if typ in code.g_code.cats.elf.NT_GNU_.values():  # thanks elfutils!
             typ = code.g_code.consts[typ]
 
           if isinstance(typ, int):
             typ = code.g_code.cats.elf.NT_[typ]
-        else:
-          if isinstance(typ, int):
-            typ = code.g_code.cats.elf.NT_GNU_[typ]
+          else:
+            if isinstance(typ, int):
+              typ = code.g_code.cats.elf.NT_GNU_[typ]
         note.n_type = typ
 
         if note.n_type == 'NT_PRSTATUS':
-          #parser = StructureReader(None)
-          #note.status = parser.parse_one(code.g_code.typs.prstatus_t, note.data)
-          pass
+          sx = Structure(code.g_code.typs.prstatus_t)
+          sx.backend.buf.write(0, note.data)
+          note.status = sx
         elif note.n_type == 'NT_SIGINFO':
           print('laaa', len(note.data))
 
@@ -149,13 +153,14 @@ class ElfUtils:
     plt_section = self.get_section('.plt')
     self.plt = {}
 
+
     if not plt_section:
       return
     reloc_map = {v: k for k, v in self.relocs.items()}
 
     plt_addr = plt_section.sh_addr
 
-    if self.arch.typ == Arch.x86_64:
+    if self.arch.typ == cmisc.Arch.x86_64:
       tb_ins = self.arch.mc.get_ins(plt_section.data, plt_addr)
 
       for ins in tb_ins:
@@ -201,6 +206,7 @@ class ElfUtils:
     return self.dyn_symbols[sym] + self.offset
 
   def get_section(self, section):
+    assert isinstance(section, str)
     section = section
     #section = self.sanitize_sym(section)
     x = self.elf.get_section_by_name(section)

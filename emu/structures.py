@@ -1,7 +1,7 @@
 from chdrft.emu.base import Memory
 from chdrft.gen.opa_clang import OpaIndex, InputOnlyFilter
-from chdrft.gen.types import is_cursor_typ, types_helper, OpaCoreType, OpaBaseType, OpaBaseField, types_helper_by_m32
-from chdrft.gen.types import unsigned_primitives_types
+from chdrft.gen.types import is_cursor_typ, OpaCoreType, OpaBaseType, OpaBaseField, types_helper_by_m32
+from chdrft.gen.types import unsigned_primitives_types, set_cur_types_helper
 from chdrft.struct.base import SparseList
 from chdrft.utils.fmt import Format
 from chdrft.utils.misc import Attributize, Arch, to_list, byte_norm, DictWithDefault, BitOps, NormHelper, struct_helper
@@ -18,6 +18,8 @@ import struct
 import yaml
 import copy
 from chdrft.algo.misc import LRUFifo
+
+import chdrft.utils.misc as cmisc
 from chdrft.emu.binary import arch_data
 
 
@@ -29,7 +31,9 @@ class Data:
     self.arch = None
 
   def set_m32(self, m32):
+    print('SETTING m32', m32)
     self.is_m32 = m32
+    set_cur_types_helper(m32)
     self.types_helper = None
     self.arch = None
 
@@ -159,13 +163,13 @@ class SimpleStructExtractor(StructExtractor):
 
   def keep_macro(self, location, name):
     for prefix in self.prefixes:
-      if name.decode().startswith(prefix):
+      if name.startswith(prefix):
         return True
     return False
 
   def keep_typ(self, location, name, kind):
     for prefix in self.prefixes:
-      if name.decode().startswith(prefix):
+      if name.startswith(prefix):
         return True
     return False
 
@@ -232,12 +236,12 @@ class StructBuilder:
   def filter(self, cursor, loc):
     if cursor.kind == CursorKind.MACRO_DEFINITION:
       for extractor in self.extractors:
-        if extractor.keep_macro(loc.location, cursor.displayname):
+        if extractor.keep_macro(loc.location, cmisc.to_str(cursor.displayname)):
           return True, extractor
 
     elif is_cursor_typ(cursor.kind):
       for extractor in self.extractors:
-        if extractor.keep_typ(loc.location, cursor.displayname, cursor.kind):
+        if extractor.keep_typ(loc.location, cmisc.to_str(cursor.displayname), cursor.kind):
           #print('keep ', cursor.displayname)
           return True, extractor
 
@@ -304,10 +308,10 @@ class Structure(Attributize):
                force_array_size=None,
                child_backend=None,
                byteoff=None):
-    super().__init__(handler=self.item_handler)
+    super().__init__(handler=self.item_handler, repr_blacklist_keys=['parent'])
     self._typ = typ
     self._base_typ = typ.get_base_typ()
-    self._children = []
+    self._children = OrderedDict()
     if byteoff is not None:
       off = byteoff * 8
     self._off = off  # in bits
@@ -350,8 +354,11 @@ class Structure(Attributize):
         for field in typ.ordered_fields:
           self.add_field(field)
 
-    self._mem = Memory(reader=self.get_buf, writer=self.set_buf, minv=0, maxv=self.bytesize)
+    #self._mem = Memory(reader=self.get_buf, writer=self.set_buf, minv=0, maxv=self.bytesize)
     self._init_accessors()
+
+  def set_alloc_backend(self, allocator):
+    self.set_backend(StructBackend(buf=BufAccessor(self.bytesize, allocator=allocator)))
 
   def _init_accessors(self):
     self._accessors = []
@@ -371,7 +378,7 @@ class Structure(Attributize):
 
   def add_child(self, typ, off, fieldname):
     res = self.create_child(typ, off, fieldname)
-    self._children.append(res)
+    self._children[len(self._children)] = res
     return res
 
   def add_field_internal(self, name, val):
@@ -463,7 +470,8 @@ class Structure(Attributize):
     if self._typ.atom_size is not None and (not isinstance(backend, TransacBackend) or backend.atom_size != self._typ.atom_size):
       backend = TransacBackend(backend.buf, self._typ.atom_size)
     self._backend = backend
-    for child in self._children:
+    self._child_backend = backend
+    for child in self._children.values():
       child.set_backend(backend)
     return self
 
@@ -494,7 +502,8 @@ class Structure(Attributize):
 
   def _set(self, typ_data, value):
     if typ_data.typ != 'float': value = round(value)
-    self._set_raw(self.val_to_buf(value, typ_data))
+    value=self.val_to_buf(value, typ_data)
+    self._set_raw(value)
 
   def get_for_call(self):
     return self._get(self._typ.typ_data)
@@ -532,6 +541,8 @@ class Structure(Attributize):
       #glog.info('Req get %s: %s %s', val, self.offset, self.bitsize)
       if not choice: return val
       return self._typ.choices.choice_str(val)
+    elif self.is_pointer:
+      return self._get(self._typ.typ_data)
     else:
       return self._get_raw()
 
@@ -552,7 +563,9 @@ class Structure(Attributize):
   def child(self, i):
     assert self.is_array
     assert self.stride != 0
-    return self.create_child(self._base_typ, i * self.stride, 'elem_%d' % i)
+    if not i in self._children:
+      self._children[i] = self.create_child(self._base_typ, i * self.stride, 'elem_%d' % i)
+    return self._children[i]
 
   def pretty_str(self, indent=0):
     prefix = '  ' * indent
@@ -563,7 +576,7 @@ class Structure(Attributize):
       s.append('%s - %s: %s' % (prefix, self._fieldname, v))
     else:
       s.append('%s %s' % (prefix, self._fieldname))
-      for child in self._children:
+      for child in self._children.values():
         s.append(child.pretty_str(indent + 1))
     return '\n'.join(s)
 
@@ -580,7 +593,7 @@ class Structure(Attributize):
       return [self.child(i).to_attr() for i in range(self.array_size)]
     else:
       res = Attributize()
-      for x in self._children:
+      for x in self._children.values():
         res[x._fieldname] = x.to_attr()
     return res
 
@@ -593,13 +606,10 @@ class Structure(Attributize):
     pstruct = Structure(self._base_typ.make_array(array_len), default_backend=None)
     addr, nbackend = self.backend.allocate(pstruct.byte_size)
     pstruct.set_backend(nbackend)
-    print('>>>', addr)
     self.set(addr)
     return pstruct
 
   def smart_set(self, cur):
-    #print('ispointer >> ', self._base_typ == self._typ, self.is_array)
-    assert not self.is_pointer
     if self.is_pointer:
       if cur is None: self.set(0)
       elif isinstance(cur, int):
@@ -1136,8 +1146,14 @@ class YamlStructBuilder:
   def get_typ(self, typ_name):
     if typ_name in self.typs:
       return self.typs[typ_name]
-    assert typ_name in self.typs_to_build, 'Bad typ %s' % typ_name
-    return self.build_typ(typ_name, self.typs_to_build[typ_name])
+    if typ_name in self.typs_to_build:
+      return self.build_typ(typ_name, self.typs_to_build[typ_name])
+
+    assert typ_name.endswith('*') != -1, 'Bad typ %s' % typ_name
+    base_type = self.get_typ(typ_name[:-1])
+    ntype = base_type.make_ptr()
+    self.add_typ(typ_name, ntype)
+    return ntype
 
   def build_typ(self, name, desc):
     # prevent loops

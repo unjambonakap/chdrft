@@ -7,6 +7,16 @@ class Status:
     RUNNING = 1
     TERMINATED = 2
 
+
+def get_str(x):
+  res = bytearray()
+  while True:
+    c = idaapi.get_byte(x)
+    if c==0: break
+    res.append(c)
+    x += 1
+  return res
+
 class IdaDebugger:
     def __init__(self):
         pass

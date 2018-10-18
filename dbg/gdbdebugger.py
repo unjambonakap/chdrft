@@ -6,6 +6,7 @@ import subprocess as sp
 import os
 import glog
 from contextlib import ExitStack
+import traceback as tb
 
 #def fix_environ():
 #  if 'VIRTUAL_ENV' in os.environ:
@@ -46,15 +47,15 @@ class GdbDebugger(ExitStack):
     self.entry_regex = re.compile('Entry point: 0x([0-9a-f]+)', re.MULTILINE)
     self.stop_handler = None
     self.set_arch()
-    self.reg = GdbReg(self.arch, self)
-    self.mem = Memory(self.get_memory, self.set_memory)
+    self.regs = GdbReg(self.arch, self)
+    self.mem = Memory(self.get_memory, self.set_memory, arch=self.arch)
     self.reason = ''
     self.set_stop_handler(lambda x: None)
-    self.reg_watch = WatchedRegs('all', self.reg, self.arch.regs)
+    self.regs_watch = WatchedRegs('all', self.regs, self.arch.regs)
     self.tracer = None
     if tracer_cb is not None:
       self.tracer = Tracer(
-          self.arch, self.reg, self.mem, [self.reg_watch], cb=tracer_cb, diff_mode=diff_mode
+          self.arch, self.regs, self.mem, [self.regs_watch], cb=tracer_cb, diff_mode=diff_mode
       )
 
   def __enter__(self):
@@ -63,6 +64,7 @@ class GdbDebugger(ExitStack):
 
   def set_arch(self):
     s = self.do_execute('show architecture')
+    print('arch >> ', s)
     self.arch = guess_arch(s)
 
   def set_aslr(self, val=True):
@@ -88,6 +90,8 @@ class GdbDebugger(ExitStack):
       print('Execute exception >> ', e)
       return None
 
+  def get_elf(self):
+    return ElfUtils(self.get_file_path())
   def get_entry_address(self):
     if 1:
       return ElfUtils(self.get_file_path()).get_entry_address()
@@ -102,15 +106,17 @@ class GdbDebugger(ExitStack):
     #s = self.do_execute('info files')
     #return re.search("`([^']*)', file type", s).group(1)
 
-  def bp_generator(self, cb=None):
+  def bp_generator(self, cb=None, should_stop=True):
     mainSelf = self
 
     class BpWithCallback(self.gdb.Breakpoint):
+      def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.silent = True
 
       def stop(self):
-        print('ON BPt CALLBSC')
-        if cb:
-          return cb(mainSelf)
+        if should_stop: super().stop()
+        if cb: return cb(mainSelf)
 
     return BpWithCallback
 
@@ -119,6 +125,8 @@ class GdbDebugger(ExitStack):
 
   def set_hard_bpt(self, ea, cb=None):
     return self.bp_generator(cb)("*0x%x" % ea, self.gdb.BP_WATCHPOINT, self.gdb.WP_ACCESS)
+  def set_hard_bpt_exe(self, ea, cb=None):
+    self.do_execute('hbreak *0x%x' % ea)
 
   def wait(self):
     pass
@@ -144,10 +152,10 @@ class GdbDebugger(ExitStack):
 
   def run_managed_fifo(self, managed_fifo, args='', silent=False):
     return self.run_with_fifo(
-        input=managed_fifo.write_fifo,
-        output=managed_fifo.read_fifo,
+      input=managed_fifo.write_fifo,
+      output=managed_fifo.read_fifo,
       silent=silent,
-        args=args,
+      args=args,
     )
 
   def run_with_fifo(self, input=None, output=None, silent=False, args=''):
@@ -278,7 +286,7 @@ class GdbDebugger(ExitStack):
     return func
 
   def caller(self):
-    mc = MachineCaller(self.arch, self.reg, self.mem, self.runner())
+    mc = MachineCaller(self.arch, self.regs, self.mem, self.runner())
     return mc
 
   def run_to(self, addr):
@@ -315,7 +323,7 @@ class GdbDebugger(ExitStack):
     return syscall is None or m.group(2) == syscall
 
 
-def launch_gdb(module, func, dbg_file=None, args=[], gdb_cmd='gdb', gdb_args=[]):
+def launch_gdb(module, func, dbg_file=None, args=[], gdb_cmd='gdb', gdb_args=[], nowait=False):
   try:
     python_cmd = """python
 import sys
@@ -340,12 +348,12 @@ finally:
     cmd += ['-ex', python_cmd]
     if dbg_file: cmd += [dbg_file]
 
-    print(cmd)
     devnull = open(os.devnull, 'r')
     p = sp.Popen(cmd, stdin=devnull)
+    if nowait:return p
     p.wait()
 
-  except Exception as e:
+  except:
     try:
       pid = p.pid
       tb.print_exc()
@@ -354,4 +362,5 @@ finally:
       failsafe(lambda: sp.call(['kill', '-9', str(pid)]))
       print('DONE KILL')
     except:
+      tb.print_exc()
       pass

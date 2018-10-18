@@ -36,6 +36,8 @@ class Process(tube.Tube):
     written = self.proc.stdin.write(data)
     self.proc.stdin.flush()
     return written
+  def close_stdin(self):
+    self.proc.stdin.close()
 
   def _recv(self, n, timeout):
     if self.proc.stdout.closed:

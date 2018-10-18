@@ -6,8 +6,8 @@ import errno
 
 
 class Sock(FileLike):
-  def __init__(self):
-    super().__init__()
+  def __init__(self, **kwargs):
+    super().__init__(**kwargs)
 
   def _do_read(self, n):
     return  self.fileobj.recv(n)

@@ -43,7 +43,7 @@ class LocationWrapper:
     self.location = location
     self.is_input = False
     if location.file:
-      self.is_input = location.file.name.decode() == inputfile
+      self.is_input = location.file.name == inputfile
 
   def __str__(self):
     return 'LocationWrapper(location={location}, is_input={is_input})'.format(**self.__dict__)
@@ -121,7 +121,7 @@ class OpaIndex:
   def add_function(self, cursor):
     tmp = OpaFunction(self, cursor)
     if tmp.build():
-      self.functions[tmp.shortname.decode()] = tmp
+      self.functions[tmp.shortname] = tmp
     return tmp
 
   def build_graph(self):

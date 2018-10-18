@@ -132,7 +132,7 @@ class Display:
     return Display.disp_2str(s1, s2, name)
 
   @staticmethod
-  def diff_lists(t1, t2, name='', **kwargs):
+  def diff_lists(t1, t2, name='', restrict_entries=None, **kwargs):
     params = Display.update_params(**kwargs)
     nmin = min(len(t1), len(t2))
 
@@ -140,6 +140,7 @@ class Display:
     s2 = []
 
     for i in range(nmin):
+      if restrict_entries is not None and i not in restrict_entries: continue
       if t1[i] != t2[i]:
         s1.append([i, t1[i]])
         s2.append([i, t2[i]])
@@ -207,7 +208,7 @@ def dict_diff(a, b):
 
 class TraceEvent:
 
-  def __init__(self, arch, regs, ins, short_mode=False, diff_mode=True):
+  def __init__(self, arch, regs, ins, addr, short_mode=False, diff_mode=True):
     self.short_mode = short_mode
     self.arch = arch
     self.mc = arch.mc
@@ -215,11 +216,11 @@ class TraceEvent:
     self.write_event = []
     self.diff_regs = dict()
     self.raw_ins = ins
-    self.desc = self.mc.ins_str(self.mc.get_one_ins(ins, regs[self.arch.reg_pc]))
+    self.pc = regs[self.arch.reg_pc]
+    self.desc = self.mc.ins_str(self.mc.get_one_ins(ins, addr))
     self.stacks = []
     self.old_stacks = None
     self.diff_mode= diff_mode
-    self.pc = regs.pc
 
     self.i_regs = self.extract_regs(regs)
     self.o_regs = None
@@ -263,7 +264,7 @@ class TraceEvent:
     data.append(Display.disp(self.read_event, name='ReadEvent'))
     data.append(Display.disp(self.write_event, name='WriteEvent'))
     if self.diff_mode: data.append(Display.diff_dicts(self.i_regs, self.o_regs, name='DiffRegs'))
-    else: data.append(Display.disp(self.o_regs, name='Regs'))
+    else: data.append(Display.disp(self.o_regs, name='Regs', num_size=self.arch.reg_size))
 
     return Display.disp_lines(*data)
 
@@ -279,13 +280,14 @@ class TraceEvent:
 
 class VmOp:
 
-  def __init__(self, arch, watched, typ, pos):
+  def __init__(self, arch, watched, typ, pos, regs):
     self.arch = arch
     self.pos = pos
     self.watched = watched
     self.start_data = Attributize()
     self.end_data = Attributize()
     self.diff_params = Attributize(elem={x.name: x.diff_params for x in watched})
+    self.regs = regs
 
     self.typ = typ
     self.reads = []
@@ -321,7 +323,7 @@ class VmOp:
 
     data = []
     data.append('VMOP at {} of typ {}, id={}'.format(
-        Display.disp(self.start_data.regs['rip']), self.typ, self.pos))
+        Display.disp(self.regs.ins_pointer), self.typ, self.pos))
     for k in self.start_data.sorted_keys():
       data.append(
           Display.diff(
@@ -346,7 +348,7 @@ class VmOp:
     data.append('ReadEvents: ' + Display.disp_list2(revents))
     data.append('WriteEvents: ' + Display.disp_list2(wevents))
     if regs:
-      rs = Display.regs_summary(regs.snapshot_all(), self.arch.regs)
+      rs = Display.regs_summary(self.regs, self.arch.regs)
       data.append('FullRegs:\n' + rs)
       for k in self.end_data.sorted_keys():
         data.append(
@@ -452,10 +454,11 @@ class Tracer:
     self.count = 0
     self.arch = arch
     self.diff_mode=diff_mode
+    self.ignore_unwatched = False
 
   def get_vm_op(self, typ):
     self.count += 1
-    return VmOp(self.arch, self.watched, typ, self.count)
+    return VmOp(self.arch, self.watched, typ, self.count, self.regs)
 
   def start_vm_op(self):
     self.vm_op = self.get_vm_op('normal')
@@ -484,9 +487,10 @@ class Tracer:
       self.send_event(self.cur)
 
     ins = self.mem.read(addr, size)
-    self.cur = TraceEvent(self.arch, self.regs, ins, short_mode, diff_mode=self.diff_mode)
+    self.cur = TraceEvent(self.arch, self.regs, ins, addr, short_mode, diff_mode=self.diff_mode)
 
   def check_access(self, addr):
+    if self.ignore_unwatched: return
     for watcher in self.watched:
       if watcher.is_in(addr):
         return
@@ -495,7 +499,7 @@ class Tracer:
   def notify_read(self, addr, n):
     self.check_access(addr)
     buf = self.mem.read2(addr, n)
-    self.cur.notify_read(addr, n, buf)
+    if self.cur: self.cur.notify_read(addr, n, buf)
 
     for x in [self.vm_op, self.load_op]:
       if x:
@@ -504,7 +508,7 @@ class Tracer:
   def notify_write(self, addr, n, nval):
     self.check_access(addr)
     val = self.mem.read2(addr, n)
-    self.cur.notify_write(addr, n, val, nval)
+    if self.cur: self.cur.notify_write(addr, n, val, nval)
 
     for x in [self.vm_op, self.load_op]:
       if x:

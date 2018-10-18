@@ -362,11 +362,8 @@ def add_syms(ctx):
 
 def extract_binary_syms(filename):
   import r2pipe
-  print('opening')
   p = r2pipe.open(filename)
-  print('la')
   p.cmd('aac')
-  print('2')
   res = p.cmdj('aflj')
   return res
 

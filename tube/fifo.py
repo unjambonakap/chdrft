@@ -6,11 +6,14 @@ import os
 import tempfile
 import time
 import errno
-from ..utils import proc
-from ..utils.misc import failsafe
-from ..utils.misc import chdrft_executor
+from chdrft.utils import proc
+from chdrft.utils.misc import failsafe
+from chdrft.utils.misc import chdrft_executor
 import threading
 import contextlib
+import traceback as tb
+import glog
+import fcntl
 
 
 class Fifo(tube.Tube):
@@ -23,36 +26,44 @@ class Fifo(tube.Tube):
     self.wfile = None
 
   def _enter(self):
-    t_w = None
-    t_r = None
+    try:
+      t_w = None
+      t_r = None
 
-    with chdrft_executor as executor:
-      if self.write_fifo:
+      from concurrent.futures import ThreadPoolExecutor
+      with ThreadPoolExecutor(4) as executor:
+        if self.write_fifo:
 
-        def t1():
-          #glog.info('opening  write %s', self.write_fifo)
-          a = open(self.write_fifo, 'wb')
-          #glog.info('done opening write')
-          return a
+          def t1():
+            glog.info('opening  write %s', self.write_fifo)
+            a = open(self.write_fifo, 'wb')
+            #w = os.open( 'my_fifo', os.O_WRONLY )
+            glog.info('done opening write')
+            return a
 
-        t_w = executor.submit(t1)
-      if self.read_fifo:
+          t_w = executor.submit(t1)
 
-        def t2():
-          #glog.info('opening  read %s', self.read_fifo)
-          a = open(self.read_fifo, 'rb')
-          #glog.info('done opening read')
-          return a
 
-        t_r = executor.submit(t2)
+        if self.read_fifo:
 
-      print('submitted')
-      if t_w:
-        self.wfile = t_w.result()
-        print('done open write')
-      if t_r:
-        self.rfile = t_r.result()
-        print('done open read')
+          def t2():
+            glog.info('opening  read %s', self.read_fifo)
+            a = open(self.read_fifo, 'rb')
+            fl = fcntl.fcntl(a.fileno(), fcntl.F_GETFL)
+            fcntl.fcntl(a.fileno(), fcntl.F_SETFL, fl | os.O_NONBLOCK)
+            #a = os.open(self.read_fifo, os.O_RDONLY  | os.O_NONBLOCK | os.O_CREAT, 0o644)
+            glog.info('done opening read')
+            return a
+
+          t_r = executor.submit(t2)
+
+        if t_w:
+          self.wfile = t_w.result()
+        if t_r:
+          self.rfile = t_r.result()
+    except:
+      tb.print_exc()
+      raise
 
   def _shutdown(self):
     if self.rfile:
@@ -69,9 +80,11 @@ class Fifo(tube.Tube):
     if not self.rfile:
       assert False, "No fifo for read"
 
+    print('TRY RECV ', n)
     if not self._recv_ready(self.rfile.fileno(), timeout):
       return None
     res = self.rfile.read(n)
+    print('has read ', res)
     if len(res) == 0:
       self.rfile.close()
     return res

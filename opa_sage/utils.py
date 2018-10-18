@@ -15,6 +15,7 @@ import itertools
 import binascii
 import re
 import chdrft.utils.cmdify as cmdify
+from collections import defaultdict
 
 
 def vec_to_poly(row, var):
@@ -268,6 +269,20 @@ def solve(ia, ib):
 
 #print('DATA >> ', data)
 #return re.search('RES_CALL=(.*)', data).group(1)
+def make_sparse():
+  def tsf(tb):
+    ntb = []
+    n = max(tb.keys())+1
+    m = 0
+    for v in tb.values():
+      m = max(m, max(v.keys())+1)
+    for i in range(n):
+      row = [0] * m
+      ntb.append(row)
+      for k, v in tb[i].items():
+        row[k] = v
+    return ntb
+  return defaultdict(lambda: defaultdict(lambda: 0)), tsf
 
 def lll(tb):
   X = Matrix(ZZ, len(tb), len(tb[0]))

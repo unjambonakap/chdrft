@@ -14,10 +14,10 @@ import glog
 import chdrft.emu.binary_consts as binary_consts
 from chdrft.utils.fmt import Format
 
-from chdrft.emu.elf import ElfUtils
 from chdrft.utils.misc import Attributize, lowercase_norm, Arch, DictUtil
 import chdrft.utils.misc as cmisc
 from chdrft.emu.base import RegExtractor
+import chdrft.emu.base as ebase
 import traceback
 try:
   import capstone as cs
@@ -59,17 +59,30 @@ class CSARMRegs(RegExtractor):
   def __init__(self):
     super().__init__(cs_arm_const, 'ARM_REG_')
 
+
 class UCMipsRegs(RegExtractor):
 
   def __init__(self):
     super().__init__(mips_const, 'UC_MIPS_REG_')
+
 
 class CSMipsRegs(RegExtractor):
 
   def __init__(self):
     super().__init__(cs_mips_const, 'MIPS_REG_')
 
+import capstone as cs
+x86_64_regs = cmisc.to_list('rax rbx rcx rdx rsi rdi rsp rbp rip r8 r9 r10 r11 r12 r13 r14 r15')
+x86_64_regs = x86_64_regs + list(['xmm{}'.format(i) for i in range(16)])
+x86_regs = ['eax', 'ebx', 'ecx', 'edx', 'esi', 'edi', 'esp', 'ebp']
+x86_16_regs = cmisc.to_list('ax bx cx dx si di sp bp ip ss cs es fs gs ds')
 
+mips_regs = cmisc.to_list(
+    'zero at v0 v1 a0 a1 a2 a3 t0 t1 t2 t3 t4 t6 t7 s0 s1 s2 s3 s4 s5 s6 s7 t8 t9 k0 k1 gp sp fp ra pc hi lo pc'
+)
+x86_redirects = dict()
+#x86_redirects = dict(fs_base='fs', gs_base='gs')
+arm_regs = list(['r%d' % i for i in range(13)] + cmisc.to_list('sp lr pc cpsr'))
 
 class RegRelationX86:
 
@@ -80,11 +93,28 @@ class RegRelationX86:
       self.par[i + 'h'] = [i + 'x', 1]
       self.par[i + 'x'] = ['e' + i + 'x', 2]
       self.par['e' + i + 'x'] = ['r' + i + 'x', 4]
+
+    for suffix in ('ip', 'sp', 'bp', 'si', 'di'):
+      self.par[suffix] = ['e' + suffix, 2]
+      self.par['e' +suffix] = ['r' + suffix, 4]
+
+
     for i in range(8, 16):
       base = 'r' + str(i)
       self.par[base + 'd'] = [base, 4]
     for i in range(0, 16):
       self.par['xmm{}'.format(i)] = [None, 16]
+    self.base = Attributize(default_none=True)
+    for x0 in x86_16_regs:
+      x = x0
+      while x is not None:
+        self.base[x] = x0
+        x = self.get_par(x)
+
+  def get_base(self, x):
+    if x in self.base:
+      return self.base[x]
+    return x
 
   def get_par(self, reg):
     if reg not in self.par:
@@ -122,27 +152,40 @@ def norm_ins(code):
   return x
 
 
-import capstone as cs
-x86_64_regs = cmisc.to_list('rax rbx rcx rdx rsi rdi rsp rbp rip r8 r9 r10 r11 r12 r13 r14 r15')
-x86_64_regs = x86_64_regs + list(['xmm{}'.format(i) for i in range(16)])
-x86_regs = ['eax', 'ebx', 'ecx', 'edx', 'esi', 'edi', 'esp', 'ebp']
 
-mips_regs = cmisc.to_list(
-    'zero at v0 v1 a0 a1 a2 a3 t0 t1 t2 t3 t4 t6 t7 s0 s1 s2 s3 s4 s5 s6 s7 t8 t9 k0 k1 gp sp fp ra pc hi lo pc'
+x86_16_arch = Attributize(
+    regs=x86_16_regs,
+    ins_size=-1,
+    reg_size=2,
+    reg_pc='ip',
+    reg_stack='sp',
+    cs_arch=cs.CS_ARCH_X86,
+    cs_mode=cs.CS_MODE_16,
+    uc_arch=uc.UC_ARCH_X86,
+    uc_mode=uc.UC_MODE_16,
+    cs_regs=CSX86Regs(),
+    uc_regs=UCX86Regs(),
+    reg_rel=RegRelationX86(),
+    call_data=Attributize(reg_return='ax', reg_call=(), has_link=False),
+    redirect=x86_redirects,
+  flags_desc=(ebase.eflags, 'eflags'),
 )
-arm_regs = list(['r%d' % i for i in range(13)] + cmisc.to_list('sp lr pc cpsr'))
 
 x86_arch = Attributize(
     regs=x86_regs,
     ins_size=-1,
     reg_size=4,
     reg_pc='eip',
+    reg_stack='esp',
     cs_arch=cs.CS_ARCH_X86,
     cs_mode=cs.CS_MODE_32,
     uc_arch=uc.UC_ARCH_X86,
     uc_mode=uc.UC_MODE_32,
     cs_regs=CSX86Regs(),
+    uc_regs=UCX86Regs(),
     reg_rel=RegRelationX86(),
+    call_data=Attributize(reg_return='eax', reg_call=(), has_link=False),
+    redirect=x86_redirects,
 )
 
 x86_64_arch = Attributize(
@@ -150,12 +193,23 @@ x86_64_arch = Attributize(
     ins_size=-1,
     reg_size=8,
     reg_pc='rip',
+    reg_stack='rsp',
     cs_arch=cs.CS_ARCH_X86,
     cs_mode=cs.CS_MODE_64,
     uc_arch=uc.UC_ARCH_X86,
     uc_mode=uc.UC_MODE_64,
     cs_regs=CSX86Regs(),
+    uc_regs=UCX86Regs(),
     reg_rel=RegRelationX86(),
+    FSMSR = 0xC0000100,
+    GSMSR = 0xC0000101,
+    call_data=[
+      Attributize(typ='linux',reg_return='rax', reg_call=cmisc.to_list('rdi rsi rdx'), has_link=False),
+      Attributize(typ='win', reg_return='rax', reg_call=cmisc.to_list('rcx rdx r8 r9'), has_link=False),
+      ]
+      ,
+    syscall_conv=cmisc.to_list('rdi rsi rdx rcx r8 r9'),
+    redirect=x86_redirects,
 )
 
 mips_arch = Attributize(
@@ -204,18 +258,41 @@ thumb_arch = Attributize(
 arch_data = {
     Arch.x86_64: x86_64_arch,
     Arch.x86: x86_arch,
+    Arch.x86_16: x86_16_arch,
     Arch.mips: mips_arch,
     Arch.arm: arm_arch,
     Arch.thumb: thumb_arch,
 }
 
+
+class CallData:
+  def __init__(self, x):
+    if not isinstance(x, tuple): x= tuple((x,))
+    self.cur= x[0]
+    self.cnds = x
+  def set_active(self, typ):
+    for v in self.cnds:
+      if v.typ == typ:
+        self.cur = v
+        break
+    else:
+      assert 0, typ
+
+  def __getattr__(self, v):
+    return self.cur[v]
+
 for k, v in arch_data.items():
   v.typ = k
+  if 'call_data' in v: v.call_data=CallData(v.call_data)
   v.typs = None
 
 
 def guess_arch(s):
   if s.find('x86-64') != -1 or s.find('x86_64') != -1: return arch_data[Arch.x86_64]
+  if s.find('x64') != -1: return arch_data[Arch.x86_64]
+  if s.find('i386') != -1: return arch_data[Arch.x86]
+  for v in Arch:
+    if s == v.name: return arch_data[v]
   for v in Arch:
     if s.find(v.name) != -1: return arch_data[v]
   return None
@@ -228,7 +305,7 @@ class Machine:
     self.reg_mapping = {}
     self.cs_arch = arch_data[arch].cs_arch
     self.cs_mode = arch_data[arch].cs_mode
-    self.arch = arch
+    self.arch = arch_data[arch]
 
     self.init_capstone()
 
@@ -267,7 +344,9 @@ class Machine:
   def ins_str(self, ins):
     if isinstance(ins, list):
       return ' ; '.join([self.ins_str(x) for x in ins])
-    return "0x%x: %s %s %s" % (ins.address, ins.mnemonic, ins.op_str, binascii.hexlify(ins.bytes[::-1]))
+    return "0x%x: %s %s %s" % (
+        ins.address, ins.mnemonic, ins.op_str, binascii.hexlify(ins.bytes[::-1])
+    )
 
 
 class ArmMachine(Machine):
@@ -290,11 +369,13 @@ class MipsMachine(Machine):
 
 class X86Machine(Machine):
 
-  def __init__(self, x64):
+  def __init__(self, x64=False, bit16=False):
     arch = Arch.x86
+    if bit16: arch=Arch.x86_16
     if x64: arch = Arch.x86_64
     super().__init__(arch)
     self.x64 = x64
+    self.bit16 = bit16
     self.regs = {}
     self.reg_mapping = {}
     self.reg_mapping['rip'] = cs.x86.X86_REG_RIP
@@ -349,10 +430,12 @@ class X86Machine(Machine):
 
 x64_mc = X86Machine(True)
 x86_mc = X86Machine(False)
+x86_16_mc = X86Machine(bit16=True)
 arm_mc = ArmMachine()
 thumb_mc = ThumbMachine()
 mips_mc = MipsMachine()
 
+arch_data[Arch.x86_16].mc = x86_16_mc
 arch_data[Arch.x86].mc = x86_mc
 arch_data[Arch.x86_64].mc = x64_mc
 arch_data[Arch.mips].mc = mips_mc
@@ -511,6 +594,7 @@ class ArmCompiler:
         'arm-linux-androideabi-g++ -c -mthumb -march=armv7-a -o {ofil} {fil}'.format(**locals()),
         shell=True
     )
+    from chdrft.emu.elf import ElfUtils
     x = ElfUtils(ofil)
     f1 = x.get_symbol(F1)
     f2 = x.get_symbol(F2)
@@ -554,9 +638,8 @@ class FilePatcher:
 
   def patch_one_ins(self, addr, content):
     one_ins = self.elf_file.get_one_ins(addr)
-    assert len(content) <= len(one_ins.bytes), 'Cannot replace %s with %s' % (
-        one_ins.bytes, content
-    )
+    assert len(content) <= len(one_ins.bytes
+                              ), 'Cannot replace %s with %s' % (one_ins.bytes, content)
     self.patch(addr, Format(content).pad(len(one_ins.bytes), self.mc.nop[0]).v)
 
   def nop_ins(self, addr):

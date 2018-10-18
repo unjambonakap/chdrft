@@ -58,16 +58,18 @@ class SyscallData():
         continue
       nfunc_name = build_func_name(func_name)
 
-      self.builder.content += '''
+      self.builder.content.append('''
 {return_val} {func_name}({func_args});
   '''.format(return_val=entry.return_val,
              func_name=nfunc_name,
              func_args=','.join(entry.params_list))
+             )
       to_proc[nfunc_name] = entry
 
     self.builder.build(extra_args=['-std=c++11'])
 
     for func_name, func in self.builder.res.functions.items():
+      print('GOT FUNC ', func_name)
       # updating entry with args from function
       func_name=build_func_name(func_name)
       if not func_name in to_proc:

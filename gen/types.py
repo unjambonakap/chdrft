@@ -17,6 +17,9 @@ import struct
 import glog
 import collections
 from asq.initiators import query as asq_query
+def to_str(x):
+  if isinstance(x, str): return x
+  return x.decode()
 
 types_list_base = [
     'bool:BOOL:1:?',
@@ -110,8 +113,12 @@ class TypesHelper:
     return struct.pack(pattern, v)
 
 
-types_helper = TypesHelper()
-types_helper_by_m32 = {True: TypesHelper(m32=True), False: TypesHelper(m32=False)}
+types_helper = None
+types_helper_by_m32 = {True: TypesHelper(m32=True), False: TypesHelper(m32=False), None: None}
+
+def set_cur_types_helper(m32):
+  global types_helper
+  types_helper = types_helper_by_m32[m32]
 
 primitive_types = [TypeKind.VOID,
                    TypeKind.BOOL,
@@ -192,7 +199,7 @@ class OpaField(OpaBaseField):
     super().__init__(parent_typ)
     self.index = index
     self.cursor = cursor
-    self.name = cursor.displayname.decode()
+    self.name = to_str(cursor.displayname)
     self.off = parent_typ.internal_typ.get_offset(cursor.displayname)
     assert self.off != -1, f'Bad at name={self.name}, location={cursor.location}, displayname={cursor.displayname}'
     self.typ = index.get_typ(cursor)
@@ -213,7 +220,8 @@ class OpaTypedef:
   def __init__(self, index, cursor):
     self.index = index
     self.cursor = cursor
-    self.name = cursor.displayname.decode()
+    self.name = to_str(cursor.displayname)
+    assert isinstance(self.name, str)
     self.typedef_typ = self.index.get_typ(None, self.cursor.underlying_typedef_type)
 
 
@@ -222,8 +230,10 @@ class OpaFunction:
   def __init__(self, index, cursor):
     self.index = index
     self.cursor = cursor
-    self.name = cursor.displayname.decode()
-    self.shortname = cursor.spelling
+    self.name = to_str(cursor.displayname)
+    assert isinstance(self.name, str)
+    self.shortname = to_str(cursor.spelling)
+
     self.typ = None
     self.args = []
 
@@ -231,13 +241,14 @@ class OpaFunction:
     self.typ = self.index.get_typ(self.cursor)
     for x in self.cursor.get_arguments():
       typ = self.index.get_typ(x)
-      self.args.append(Attributize(name=x.spelling.decode(), typ=typ))
+      self.args.append(Attributize(name=x.spelling, typ=typ))
     return True
 
 
 class OpaMacro:
 
   def conv_macro(self, val):
+    val = to_str(val)
     assert len(val) > 0
     if val[0] == "'":
       #assert len(val)==3, val , might have comments after chars :( kappa
@@ -276,9 +287,9 @@ class OpaMacro:
       return False
       #assert 0, f'location={self.cursor.location}, displayname={self.cursor.displayname}'
 
-    self.name = self.tokens[0].spelling.decode()
-    self.val = b''.join([x.spelling for x in self.tokens[1:]])
-    self.val = self.conv_macro(self.val.decode())
+    self.name = to_str(self.tokens[0].spelling)
+    self.val = ''.join([to_str(x.spelling) for x in self.tokens[1:]])
+    self.val = self.conv_macro(self.val)
 
     if self.tokens[1].kind != TokenKind.LITERAL:
       #print(self.tokens[1].spelling)
@@ -307,7 +318,7 @@ class OpaVar:
     else:
       self.typ = self.index.get_typ(cursor)
 
-    self.name = self.cursor.spelling.decode()
+    self.name = to_str(self.cursor.spelling)
     self.val = None
     self.mark = False
 
@@ -321,7 +332,7 @@ class OpaVar:
     if len(tokens) == 0:
       return True
     token = tokens[0]
-    val = token.spelling.decode()
+    val = token.spelling
 
     if elem.kind == CursorKind.STRING_LITERAL:
       self.val = val[1:-1]
@@ -427,6 +438,15 @@ class OpaBaseType(object):
     array_type.finalize()
     return array_type
 
+  def make_ptr(self):
+    ptr_type = OpaBaseType()
+    ptr_type.typ_data = types_helper.by_name['ptr']
+    ptr_type.base_typ = self.get_base_typ()
+    ptr_type.ptr_count = self.ptr_count + 1
+    ptr_type.name = f'*{self.name}'
+    ptr_type.finalize()
+    return ptr_type
+
 
   def add_accessor(self, accessor):
     self.accessors.append(accessor)
@@ -438,6 +458,8 @@ class OpaBaseType(object):
     self.base_size = self.get_base_typ().size
     if self.array_size >= 0:
       self.size = self.base_size * self.array_size
+    elif self.ptr_count > 0:
+      self.size = types_helper.by_name['ptr'].size * 8
 
   def add_field(self, field):
     self.fields[field.name] = field
@@ -508,7 +530,7 @@ class OpaBaseType(object):
   def __str__(self):
     if isinstance(self.name, str):
       return 'Typ: ' + self.name
-    return 'Typ: ' + self.name
+    return 'Typ: ' + self.name.decode()
 
   def struct(self, *args, **kwargs):
     from chdrft.emu.structures import Structure
@@ -546,6 +568,9 @@ class OpaType(OpaBaseType):
 
     self.desc = OpaType.get_key(self.cursor, self.internal_typ)
     self.name = self.desc
+    if self.name is not None:
+      print(self.name)
+      assert isinstance(self.name, str)
 
     if self.internal_typ:
       self.kind = self.internal_typ.kind
@@ -584,23 +609,23 @@ class OpaType(OpaBaseType):
 
     cur = None
     if typ:
-      return typ.spelling.decode()
+      return to_str(typ.spelling)
     else:
       if cursor.kind == CursorKind.FUNCTION_DECL:
-        cur = cursor.spelling
+        cur = to_str(cursor.spelling)
       else:
-        return cursor.type.spelling.decode()
+        return to_str(cursor.type.spelling)
     res = None
 
     if cursor:
       res = OpaType.get_key(cursor.semantic_parent)
     if not res:
-      res = b''
+      res = ''
     elif len(cur) > 0:
-      res += b'::'
+      res += '::'
 
     res += cur
-    return res.decode()
+    return res
 
   @property
   def comment(self):
@@ -702,13 +727,13 @@ class OpaType(OpaBaseType):
     self.internal_typ = self.base_typ.internal_typ
     assert self.base_typ != None
     for u in self.cursor.get_children():
-      elem_name = u.displayname.decode()
+      elem_name = u.displayname
       self.add_enum_val(elem_name, u.enum_value)
       self.choices.add_choice(elem_name, u.enum_value, do_norm=False)
 
   def init_record(self):
     cursor = self.cursor
-    self.name = cursor.displayname.decode()
+    self.name = to_str(cursor.displayname)
     tmp = cursor.canonical.type.get_canonical()
     glog.info('adding record %s', self.name)
 
@@ -803,7 +828,7 @@ class OpaType(OpaBaseType):
     return tmp
 
   def normalize_spelling(typ):
-    name = typ.spelling.decode()
+    name = typ.spelling
     name = re.sub(r'\s*(const|volatile)\s*', '', name)
     return name
 

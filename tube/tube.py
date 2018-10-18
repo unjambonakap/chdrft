@@ -8,17 +8,23 @@ import select
 import time
 import glog
 from chdrft.utils.fmt import Format
+from contextlib import ExitStack
+import sys
+import threading
 
 from datetime import datetime, timedelta
 
 
-class Tube:
+class Tube(ExitStack):
 
-  def __init__(self):
+  def __init__(self, logfile=None):
+    super().__init__()
     self.running = False
     self.buf = b''
     self.recv_size = 4096
     self.log = 0
+    self.logfile=logfile
+    self.eof = 0
 
   def _enter(self):
     raise "virtual_pur"
@@ -28,6 +34,11 @@ class Tube:
 
   def _recv(self, n, timeout):
     raise "virtual_pur"
+
+  def recv_base(self, n, timeout):
+    res =  self._recv(n, timeout)
+    if self.logfile: self.logfile_obj.write(res)
+    return res
 
   def _shutdown(self):
     raise "virtual_pur"
@@ -66,10 +77,12 @@ class Tube:
       if len(data) > 0:
         return data
 
-      res = self._recv(self.recv_size, timeout=timeout)
+      res = self.recv_base(self.recv_size, timeout=timeout)
       if res is None:
+        self.eof = 1
         raise EOFError
-      #glog.debug('recv: %d >> %s', len(res), res)
+      glog.debug('recv: %d >> %s', len(res), res)
+
       self.buf += res
 
   def recv_fixed_size(self, size, timeout=None):
@@ -87,7 +100,7 @@ class Tube:
         return cur[:pos]
 
       try:
-        tmp = self._recv(self.recv_size, timeout)
+        tmp = self.recv_base(self.recv_size, timeout)
         self.buf = cur
         glog.debug('recv_until: %d >> got=%s, cur=%s', len(tmp), tmp, cur)
         if len(tmp) == 0:
@@ -98,6 +111,7 @@ class Tube:
 
       if tmp is None:
         self.buf = cur
+        self.eof = 1
         raise EOFError
       cur += tmp
 
@@ -110,24 +124,65 @@ class Tube:
       timeout = misc.Timeout.from_sec(0)
     while True:
       try:
-        tmp = self._recv(4096, timeout)
-        glog.debug('Trashing ', tmp)
+        tmp = self.recv_base(self.recv_size, timeout)
+        glog.debug('Trashing %s', tmp)
       except EOFError:
+        self.eof = 1
         raise
       except:
         break
 
       if tmp is None:
+        self.eof = 1
         raise EOFError
       res += tmp
     return res
+
+  def get_to_end(self, timeout=None):
+    timeout = self.normalize_timeout(timeout)
+    res = bytearray()
+    res += self.buf
+    self.buf = b''
+    self.xres = res
+    if timeout is None:
+      timeout = misc.Timeout.from_sec(0)
+    while True:
+      try:
+        tmp = None
+        tmp = self.recv_base(self.recv_size, timeout)
+        glog.debug('Trashing %s', tmp)
+      except EOFError:
+        self.eof = 1
+        pass
+      except:
+        raise
+
+      if tmp is None:
+        return res
+      res += tmp
+      self.xres = res
+    return res
+
+  def recv_timeout(self, timeout):
+    try:
+      res = self.get_to_end(timeout=timeout)
+    except misc.TimeoutException as e:
+      res = self.xres
+    return res
+
+
+
+  def send_padded(self, data, npad):
+    data=Format(data).tobytes().pad(npad, ord(' ')).v
+    glog.debug('Sending data %s', data)
+    return self._send(data)
 
   def send(self, data):
     data=Format.ToBytes(data)
     glog.debug('Sending data %s', data)
     return self._send(data)
 
-  def send_and_expect(self, data, matcher, timeout=1):
+  def send_and_expect(self, data, matcher, timeout=None):
     self.send(data)
     return self.recv_until(matcher, timeout)
 
@@ -136,12 +191,17 @@ class Tube:
     self.running = True
 
   def __enter__(self):
+    super().__enter__()
+    if self.logfile:
+      self.logfile_obj = open(self.logfile, 'wb')
+      self.enter_context(self.logfile_obj)
     self.start()
     return self
 
   def __exit__(self, typ, value, tb):
     glog.info('Exit tube')
     self.shutdown()
+    super().__exit__(typ, value, tb)
 
   def shutdown(self):
     if self.running == False:
@@ -156,6 +216,37 @@ class Tube:
     else:
       return select.select([fd], [], [], timeout.get_sec()) == \
                 ([fd], [], [])
+
+
+  def interactive(self, use_input=True, safe_print=1):
+
+    print('Starting interactive mode >> ')
+    done = threading.Event()
+    def recv_func():
+      while not done.is_set() and not self.eof:
+        dx = self.recv_timeout(timeout=0.1)
+        if dx: 
+          if safe_print:
+            print(dx)
+          else:
+            print(dx.decode(), end='')
+
+    recv_thread = threading.Thread(target=recv_func)
+    recv_thread.start()
+
+    try:
+      while True:
+        if use_input:
+          d = input('>>') + '\n'
+        else:
+          d = sys.stdin.read(1)
+        self.send(d)
+    except Exception as e:
+      tb.print_exc(e)
+      pass
+    done.set()
+    recv_thread.join()
+
 
 
 class TubeWrapper(Tube):

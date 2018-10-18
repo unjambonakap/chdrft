@@ -6,6 +6,7 @@ from chdrft.utils.cmdify import ActionHandler
 from chdrft.utils.misc import Attributize, cwdpath
 import glog
 from chdrft.emu.structures import StructBuilder, SimpleStructExtractor, Structure, StructBackend, BufAccessor, BufAccessorBase
+from chdrft.emu.base import Stack
 
 from contextlib import ExitStack
 import ctypes
@@ -46,44 +47,67 @@ class FuncCallWrapperGen:
         typ=self.find_typ(name), addr=self.find_address(name), caller=self.caller)
 
 
-class MachineCaller:
-  def __init__(self, arch, regs, mem, runner):
+class MachineCallerBase:
+  def __init__(self, runner, arch, regs, mem, ret_hook_addr=None):
+    self.runner = runner
     self.arch = arch
     self.regs = regs
     self.mem = mem
-    self.runner = runner
+    self.stack =Stack(self.regs, self.mem, self.arch)
+    self.ret_hook_addr = ret_hook_addr
 
-  def __call__(self, func, *args):
-    ret_pc = self.regs[self.arch.reg_pc]
-    print('CALLING ', func, args)
-    self.regs[self.arch.reg_pc] = func
-    self.regs[self.arch.reg_link] = ret_pc
 
+  def get_arg(self, i):
+    nregcall=len(self.arch.call_data.reg_call)
+    if nregcall >= i:
+      return self.regs[self.arch.call_data.reg_call[i]]
+    return self.stack.get(i - nregcall)
+
+  def prepare(self, func, *args, ret_to_pad=True):
+    if ret_to_pad: ret_pc = self.ret_hook_addr
+    else: ret_pc = self.regs[self.arch.reg_pc]
+    self.regs.ins_pointer = func
+
+    rem = []
     for i, arg in enumerate(args):
-      self.regs[self.arch.call_data.reg_call[i]] = arg
+      if len(self.arch.call_data.reg_call) > i:
+        self.regs[self.arch.call_data.reg_call[i]] = arg
+      else: rem.append(arg)
+    for e in rem[::-1]:
+      self.stack.push(e)
+
+    if self.arch.call_data.has_link: self.regs[self.arch.reg_link] = ret_pc
+    else: self.stack.push(ret_pc)
+
     self.runner(ret_pc)
-    res = self.regs[self.arch.call_data.reg_return]
-    return res
 
-class AsyncMachineCaller:
-  def __init__(self, arch, regs, mem, runner):
-    self.arch = arch
-    self.regs = regs
-    self.mem = mem
-    self.runner = runner
+  def ret_func(self, retv=None):
+    if retv is not None:
+      self.regs[self.arch.call_data.reg_return] = retv
+    if self.arch.call_data.has_link: self.regs.ins_pointer = self.regs[self.arch.reg_link]
+    else:
+      self.regs.ins_pointer = self.stack.pop()
 
-  def __call__(self, func, *args):
-    ret_pc = self.regs[self.arch.reg_pc]
-    print('CALLING ', func, args)
-    self.regs[self.arch.reg_pc] = func
-    self.regs[self.arch.reg_link] = ret_pc
 
-    for i, arg in enumerate(args):
-      self.regs[self.arch.call_data.reg_call[i]] = arg
-    self.runner(ret_pc)
+  def get_ret(self):
+    return self.regs[self.arch.call_data.reg_return]
+
+class MachineCaller(MachineCallerBase):
+  def __init__(self, *args, **kwargs):
+    super().__init__(*args, **kwargs)
+
+  def __call__(self, func, *args, **kwargs):
+    self.prepare(func, *args, **kwargs)
+    return self.get_ret()
+
+class AsyncMachineCaller(MachineCallerBase):
+  def __init__(self, *args, **kwargs):
+    super().__init__(*args, **kwargs)
+
+  def __call__(self, func, *args, **kwargs):
+    self.prepare(func, *args)
     yield
-    res = self.regs[self.arch.call_data.reg_return]
-    print('RETURNING FINAL RESULT ', res)
+    res = self.get_ret()
     yield res
 
 
@@ -113,6 +137,9 @@ class SimpleBufGen:
 
   def __call__(self, addr, sz, **kwargs):
     return SimpleBuf(addr, sz, self.read, self.write, **kwargs)
+
+def mem_simple_buf_gen(mem):
+  return SimpleBufGen(read=mem.read, write=mem.write)
 
 
 class CTypesBuf(BufAccessor):
@@ -147,35 +174,6 @@ class CTypesAllocator(ExitStack):
     self.callback(self.objs.clear)
     return self
 
-
-class SimpleAllocator(ExitStack):
-
-  def __init__(self, alloc=None, free=None, bufcl=CTypesBuf):
-    super().__init__()
-    self.alloc = alloc
-    self.free = free
-    self.bufcl = bufcl
-
-  def __call__(self, sz):
-    addr = self.alloc(sz)
-    self.callback(self.free, addr)
-    return addr, self.bufcl(addr, sz, allocator=self)
-
-class DummyAllocator(SimpleAllocator):
-  def __init__(self, addr, sz, bufcl):
-    super().__init__(alloc=self.alloc_func, free=self.free_func, bufcl=bufcl)
-    self.addr = addr
-    self.sz = sz
-    self.pos = 0
-
-  def alloc_func(self, sz):
-    ret = self.addr + self.pos
-    self.pos += sz
-    assert self.pos <= self.sz
-    return ret
-
-  def free_func(self, addr):
-    print('KAPPA freeing ', addr)
 
 
 
@@ -217,7 +215,7 @@ class FunctionCaller:
 
 class AsyncFunctionCaller:
 
-  def __init__(self, allocator, fcgen):
+  def __init__(self, allocator, fcgen=None):
     self.allocator = allocator
     self.fcgen = fcgen
     self.coroutine = None
@@ -229,7 +227,7 @@ class AsyncFunctionCaller:
   def do_call(self, func, *args, **kwargs):
     self.coroutine = self.call_func(func, *args, **kwargs)
     next(self.coroutine)
-  
+
   def result(self):
     return next(self.coroutine)
 
@@ -253,9 +251,7 @@ class AsyncFunctionCaller:
         data.append(s.get_for_call())
       cx = func(*data)
       tmp_res = next(cx) # enter function
-      print('FUNCTION READY TO BE CALLED')
       yield tmp_res
-      print('NOW SETTING RESULT OF FUNCTIOn')
       yield next(cx) #now ready to set result
 
   def __call__(self, *args, **kwargs):

@@ -16,7 +16,7 @@ def ElecDir(*args):
 def ToolsDir(*args):
   return ProgDir('tools', *args)
 def PinDir(*args):
-  return ToolsDir('pin-3.2-81205-gcc-linux', *args)
+  return ToolsDir('pin-3.7-97619-g0d0c92f4f-gcc-linux', *args)
 
 def CC1110Dir(*args):
   return ElecDir('cc1110', *args)

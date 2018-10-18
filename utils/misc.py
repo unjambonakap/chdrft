@@ -16,9 +16,12 @@ import sys
 import glog
 from collections import OrderedDict, defaultdict
 import csv
-import ply
 import fnmatch
 import glob
+
+def to_str(x):
+  if isinstance(x, str): return x
+  return x.decode()
 
 try:
   from enum import Enum
@@ -37,7 +40,10 @@ except:
   pass
 is_python2 = sys.version_info < (3, 0)
 if is_python2:
-  from builtins import *
+  try:
+    from builtins import *
+  except:
+    pass
 
 
 misc_backend = None
@@ -378,6 +384,7 @@ class Attributize(dict):
                handler=None,
                key_norm=None,
                affect_elem=True,
+               repr_blacklist_keys=[],
                **rem):
     if elem is None:
       if (default is not None) or default_none:
@@ -391,6 +398,7 @@ class Attributize(dict):
     super().__setattr__('_other', other)
     super().__setattr__('_handler', handler)
     super().__setattr__('_affect_elem', affect_elem)
+    super().__setattr__('_repr_blacklist_keys', list(repr_blacklist_keys))
 
   def __reduce__(self):
     return (self.__class__, (self._elem,))
@@ -455,9 +463,9 @@ class Attributize(dict):
 
   def __getitem__(self, name):
     name = self.norm_key(name)
-    if name in self._elem:
+    try:
       return self._elem[name]
-    else:
+    except KeyError:
       if self._other:
         return self.__add_key(name, self._other(name))
       if self._handler:
@@ -492,7 +500,10 @@ class Attributize(dict):
     #return yaml.dump(dict(self._elem), default_flow_style=False)
 
   def __repr__(self):
-    return repr(dict(self._elem))
+    tmp = dict(self._elem)
+    for k in self._repr_blacklist_keys:
+      if k in tmp: del tmp[k]
+    return repr(tmp)
 
   def to_yaml(self):
     return yaml.dump(dict(self._elem), default_flow_style=False)
@@ -627,6 +638,30 @@ class PatternMatcher:
       return x.start()
 
     return PatternMatcher(checker, start)
+
+class TwoPatternMatcher:
+  def __init__(self, a,b):
+    self.a = PatternMatcher.Normalize(a)
+    self.b = PatternMatcher.Normalize(b)
+    self.a_check = False
+    self.b_check = False
+
+  def check(self, data):
+    ar = self.a(data)
+    if ar is not None:
+      self.a_check = True
+      return ar
+
+    br =  self.b(data)
+    if br is not None:
+      self.b_check = True
+      return br
+    return None
+
+  def __call__(self, data):
+    return self.check(data)
+
+
 
 
 class SeccompFilters:
@@ -806,6 +841,7 @@ class BitMapper:
 
   def __init__(self, desc):
     self.desc = desc
+    self.field_to_pos = dict({v:i for i,v in enumerate(desc)})
 
   def from_value(self, value):
     res = Attributize(default=lambda: 0)
@@ -1018,6 +1054,7 @@ if sys.version_info >= (3, 0):
 
   class Arch(Enum):
     x86 = 'x86'
+    x86_16 = 'x86_16'
     x86_64 = 'x86_64'
     mips = 'mips'
     arm = 'arm'

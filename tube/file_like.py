@@ -15,8 +15,8 @@ import glog
 
 class FileLike(tube.Tube):
 
-  def __init__(self, fileobj=None):
-    super().__init__()
+  def __init__(self, fileobj=None, **kwargs):
+    super().__init__(**kwargs)
     self.closed = {'recv': True, 'send': True}
     self.fileobj = None
     if fileobj:
