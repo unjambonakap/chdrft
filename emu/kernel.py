@@ -3,6 +3,7 @@ from chdrft.emu.base import Regs, Memory, BufferMemReader, RegContext, DummyAllo
 from chdrft.emu.code_db import code
 from chdrft.emu.elf import ElfUtils, MEM_FLAGS
 from chdrft.emu.structures import Structure, MemBufAccessor
+from chdrft.emu.binary import norm_arch
 from chdrft.emu.trace import Tracer, Display, WatchedMem, WatchedRegs
 from chdrft.utils.opa_math import rotlu32, modu32
 from chdrft.utils.misc import cwdpath, Attributize, Arch, opa_print, to_list, lowercase_norm
@@ -19,6 +20,7 @@ import traceback as tb
 import glog
 from chdrft.emu.func_call import MachineCaller, mem_simple_buf_gen, AsyncMachineCaller, FunctionCaller, AsyncFunctionCaller
 import re
+from collections.abc import Iterable
 
 
 def safe_hook(func):
@@ -61,21 +63,25 @@ def load_elf(kern, fil):
     for seg_flag, uc_flag in flag_mp:
       if seg_flag & s.p_flags:
         flag_mem = flag_mem | uc_flag
-    print(s)
+
+    flag_mem |= uc.UC_PROT_EXEC
     addr = s.p_vaddr
     sz = s.p_memsz
     align = s.p_align
+    align = max(align, 4096)
 
     if s.p_paddr != 0:
-      base_addr = addr - s.p_offset
+      #base_addr = addr - s.p_offset
+      base_addr = addr
+      base_addr = base_addr - base_addr % align
     else:
       addr =base_addr = s.p_vaddr
-    base_addr = base_addr - addr % align
+    #base_addr = base_addr - addr % align
     seg_sz = sz + addr % align
     seg_sz = (sz + align - 1) & ~(align - 1)
     seg_sz = (seg_sz +4095) & ~4095
 
-    print('LOADING ', flag_mem, hex(base_addr), seg_sz)
+    print('LOADING ', flag_mem, hex(base_addr), hex(addr), seg_sz, hex(s.p_offset))
     kern.mem_map(base_addr, seg_sz, flag_mem)
 
     content = elf.get_seg_content(s)
@@ -248,9 +254,11 @@ class Kernel:
       orig_elf=None,
       qemu_state=None,
       bochs_state=None,
-      base=0
+      base=0,
+      **kwargs
   ):
 
+    arch = norm_arch(arch)
     lib = None
     if elf:
       lib = ElfUtils(elf)
@@ -262,13 +270,14 @@ class Kernel:
     elif bochs_state:
       assert arch is not None
       lib = bochs_state
-
-    else:
+    elif pe:
       lib = pefile.PE(pe)
       assert arch is not None
+    else:
+      lib = None
 
     mu = uc.Uc(arch.uc_arch, arch.uc_mode)
-    kern = Kernel(mu, arch)
+    kern = Kernel(mu, arch, **kwargs)
     if elf:
       assert base == 0
       lib = load_elf(kern, lib)
@@ -277,8 +286,10 @@ class Kernel:
       lib = load_qemu_state(kern, lib)
     elif bochs_state:
       lib = load_bochs_state(kern, lib)
-    else:
+    elif pe:
       lib = load_pe(kern, lib, base=base)
+    else:
+      kern.post_load()
 
     kern.lib = lib
 
@@ -304,7 +315,7 @@ class Kernel:
     return kern, lib
 
   def mem_map(self, start, sz, flags):
-    print('MAPPING ', hex(start), sz, flags)
+    print('MAPPING ', hex(start), hex(sz), flags)
     self.mu.mem_map(start, sz, flags)
     self.maps.append((start, sz, flags))
 
@@ -325,7 +336,9 @@ class Kernel:
     return (target, n)
 
   def ret_hook(self, *args):
-    if self.forward_ret_hook:
+    if isinstance(self.forward_ret_hook, Iterable):
+      next(self.forward_ret_hook)
+    elif self.forward_ret_hook:
       self.forward_ret_hook(*args)
 
   def post_init(self):
@@ -336,9 +349,7 @@ class Kernel:
 
     self.forward_ret_hook = None
     self.ret_hook_addr = self.scratch[0]  # maybe not use this address
-    self.mu.hook_add(
-        uc.UC_HOOK_CODE, safe_hook(self.ret_hook), None, self.ret_hook_addr, self.ret_hook_addr + 1
-    )
+    self.hook_addr(self.ret_hook_addr, self.ret_hook)
 
     self.mc = MachineCaller(
         self.kern_runner_interface(),
@@ -365,7 +376,9 @@ class Kernel:
       stack_size = 0x100000
       self.stack_seg = self.alloc_seg(stack_size, uc.UC_PROT_READ | uc.UC_PROT_WRITE)
       self.regs.stack_pointer = self.stack_seg[0] + self.stack_seg[1]
+
     self.fcaller = AsyncFunctionCaller(self.heap)
+    self.fcaller.fcgen.caller=self.amc
 
 
   def set_scratch(self):
@@ -379,12 +392,16 @@ class Kernel:
     self.mem = Memory(self.byte_reader, self.write_mem, arch=arch)
     self.mu = mu
     self.arch = arch
+    self.machine = arch.mc
     self.regs = UCRegReader(self.arch, self.mu)
     self.maps = []
     self.scratch = None
     from chdrft.emu.syscall import SyscallDb, g_sys_db
-    self.syscalls = g_sys_db.data[arch.typ]
-    self.syscall_handlers = {}
+    try:
+      self.syscalls = g_sys_db.data[arch.typ]
+      self.syscall_handlers = {}
+    except:
+      pass
     #self.syscall_handlers = {'mmap': self.mmap_handler,
     #                         #'__rt_sigreturn': self.sigreturn_handler,
     #                         'write': self.write_handler}
@@ -437,7 +454,7 @@ class Kernel:
     return KernelRunner(None)
 
   def default_fail_import_hook(self, func):
-    print(hex(self.regs.rip))
+    print(hex(self.regs.ins_point))
     assert 0, func
 
   def func_hook_import(self, mu, address, size, _2):
@@ -445,13 +462,18 @@ class Kernel:
 
     if func in self.defined_hooks: res = self.defined_hooks[func](func)
     else: res = self.default_import_hook(func)
-    self.regs.rax = res
-    self.mc.ret_func()
+    self.mc.ret_func(res)
+
+  def hook_addr(self, addr, func):
+    self.mu.hook_add(uc.UC_HOOK_CODE, safe_hook(func), None, addr, addr + 1)
 
   def hook_imports(self, plt):
     for func, addr in plt.items():
+      self.mock_func(addr, func)
+
+  def mock_func(self, addr, func):
       self.plt_addr_to_func[addr] = func
-      self.mu.hook_add(uc.UC_HOOK_CODE, safe_hook(self.func_hook_import), None, addr, addr + 1)
+      self.hook_addr(addr, func)
 
   def dump_log(self):
     return
@@ -486,6 +508,15 @@ class Kernel:
   def hook_intr(self, intno, addr):
     if self.hook_intr_func:
       self.hook_intr_func(intno, addr)
+
+  def context_str(self):
+    ip = self.regs.ins_pointer
+    mem = self.mem.read(ip, 10)
+    data = self.arch.mc.ins_str(self.arch.mc.get_one_ins(mem, ip))
+    s = f'INS {data}\n'
+    s += Display.regs_summary(self.regs, self.regs)
+
+    return s
 
   def hook_code(self, mu, address, size, _2):
     self.ins_count += 1

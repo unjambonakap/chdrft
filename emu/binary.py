@@ -19,6 +19,12 @@ import chdrft.utils.misc as cmisc
 from chdrft.emu.base import RegExtractor
 import chdrft.emu.base as ebase
 import traceback
+import shutil
+from chdrft.gen.types import types_helper_by_m32
+from chdrft.utils.cmdify import ActionHandler
+from chdrft.cmds import CmdsList
+from chdrft.main import app
+
 try:
   import capstone as cs
   from capstone.x86_const import *
@@ -203,10 +209,10 @@ x86_64_arch = Attributize(
     reg_rel=RegRelationX86(),
     FSMSR = 0xC0000100,
     GSMSR = 0xC0000101,
-    call_data=[
+    call_data=(
       Attributize(typ='linux',reg_return='rax', reg_call=cmisc.to_list('rdi rsi rdx'), has_link=False),
       Attributize(typ='win', reg_return='rax', reg_call=cmisc.to_list('rcx rdx r8 r9'), has_link=False),
-      ]
+      )
       ,
     syscall_conv=cmisc.to_list('rdi rsi rdx rcx r8 r9'),
     redirect=x86_redirects,
@@ -249,10 +255,15 @@ thumb_arch = Attributize(
     ins_size=2,
     reg_size=4,
     reg_pc='pc',
+    reg_link='lr',
+    reg_stack='sp',
     cs_arch=cs.CS_ARCH_ARM,
     cs_mode=cs.CS_MODE_THUMB,
     uc_arch=uc.UC_ARCH_ARM,
     uc_mode=uc.UC_MODE_THUMB,
+    cs_regs=CSARMRegs(),
+    uc_regs=UCARMRegs(),
+    call_data=Attributize(reg_return='r0', reg_call=cmisc.to_list('r0 r1 r2 r3')),
 )
 
 arch_data = {
@@ -266,8 +277,9 @@ arch_data = {
 
 
 class CallData:
-  def __init__(self, x):
+  def __init__(self, arch, x):
     if not isinstance(x, tuple): x= tuple((x,))
+    self.arch = arch
     self.cur= x[0]
     self.cnds = x
   def set_active(self, typ):
@@ -279,11 +291,21 @@ class CallData:
       assert 0, typ
 
   def __getattr__(self, v):
-    return self.cur[v]
+    res =  getattr(self.cur, v)
+    print("QUERY ", v, res)
+    return res
+  def norm_func_addr(self, addr):
+    if self.arch.typ == Arch.thumb:
+      return addr | 1
+    return addr
 
 for k, v in arch_data.items():
   v.typ = k
-  if 'call_data' in v: v.call_data=CallData(v.call_data)
+  if v.reg_size == 4: v.typs_helper = types_helper_by_m32[True]
+  elif v.reg_size == 8: v.typs_helper = types_helper_by_m32[False]
+
+  if 'call_data' in v: v.call_data=CallData(v, v.call_data)
+
   v.typs = None
 
 
@@ -296,6 +318,11 @@ def guess_arch(s):
   for v in Arch:
     if s.find(v.name) != -1: return arch_data[v]
   return None
+
+def norm_arch(arch):
+  if isinstance(arch, str): arch = guess_arch(arch)
+  if isinstance(arch, Arch): arch = arch_data[arch]
+  return arch
 
 
 class Machine:
@@ -348,18 +375,26 @@ class Machine:
         ins.address, ins.mnemonic, ins.op_str, binascii.hexlify(ins.bytes[::-1])
     )
 
+  def get_disassembly(self, code, addr=0, **kwargs):
+    assert 0
 
 class ArmMachine(Machine):
 
   def __init__(self):
     super().__init__(Arch.arm)
 
+  def get_disassembly(self, code, addr=0, **kwargs):
+    compiler = ArmCompiler(thumb=0, **kwargs)
+    return compiler.get_assembly(code)
 
 class ThumbMachine(Machine):
 
   def __init__(self):
     super().__init__(Arch.thumb)
 
+  def get_disassembly(self, code, addr=0, **kwargs):
+    compiler = ArmCompiler(thumb=1, **kwargs)
+    return compiler.get_assembly(code)
 
 class MipsMachine(Machine):
 
@@ -389,7 +424,7 @@ class X86Machine(Machine):
       return self.regs[cs.x86.X86_REG_RIP] + v
     return None
 
-  def get_call(self, ins):
+  def get_call(self, ins, addr=0):
     if ins.id != cs.x86.X86_INS_CALL:
       return None
     if len(ins.operands) != 1:
@@ -400,17 +435,17 @@ class X86Machine(Machine):
       return None
     return op0.imm
 
-  def get_disassembly(self, code):
+  def get_disassembly(self, code, addr=0):
     f = tempfile.NamedTemporaryFile()
     f2 = tempfile.NamedTemporaryFile()
 
     x = norm_ins(code)
 
     if not self.x64:
-      x = 'BITS 32\n' + x
+      x = f'BITS 32\nORG {addr}\n' + x
     else:
-      x = 'BITS 64\n' + x
-    f.write(x.encode('ascii'))
+      x = f'BITS 64\nORG {addr}\n' + x
+    f.write(x.encode())
     f.flush()
 
     sp.check_call('nasm %s -o %s' % (f.name, f2.name), shell=True)
@@ -570,28 +605,41 @@ def cs_print_x86_insn(insn):
 
 
 class ArmCompiler:
+  def __init__(self, compiler=None, arch='', cpu='cortex-m0', thumb=1):
+    for cnd in ('arm-none-eabi-gcc', 'arm-linux-androideabi-gcc'):
+      if compiler is not None: break
+      compiler = shutil.which(cnd)
+    assert compiler is not None
 
-  def get_assembly(self, code, thumb=True):
+    self.compiler = compiler
+    self.thumb = thumb
+    opts = []
+    if thumb: opts.append('-mthumb')
+    if arch: opts.append(f'-march={arch}')
+    if cpu: opts.append(f'-mcpu={cpu}')
+    self.opts = ' '.join(opts)
+
+  def get_assembly(self, code):
     fil = tempfile.mkstemp(suffix='.S')[1]
     ofil = tempfile.mkstemp()[1]
     F1 = 'MAINKAPPA'
     F2 = 'MAINKAPPA_END'
 
     code = norm_ins(code)
-    s = '''
-.THUMB
+    s = f'''
+{'.THUMB' if self.thumb else ''}
 .global {F1}
 {F1}:
 {code}
 
 .global {F2}
 {F2}:
-'''.format(**locals())
+'''
 
     open(fil, 'w').write(s)
     print('fil', fil, 'ofile', ofil)
     sp.check_call(
-        'arm-linux-androideabi-g++ -c -mthumb -march=armv7-a -o {ofil} {fil}'.format(**locals()),
+        f'{self.compiler} -c {self.opts} -o {ofil} {fil}'.format(**locals()),
         shell=True
     )
     from chdrft.emu.elf import ElfUtils
@@ -604,17 +652,23 @@ class ArmCompiler:
 
 class FilePatcher:
 
-  def __init__(self, fname, mc, dry=False):
+  def __init__(self, fname, mc, ofile=None, dry=False):
     from chdrft.emu.elf import ElfUtils
     self.elf_file = ElfUtils(fname)
     self.fname = fname
     self.mc = mc
     self.patches = []
     self.dry = dry
+    self.ofile = ofile
 
   def apply(self):
+    tgt_file = self.fname
+    if self.ofile is not None:
+      shutil.copy2(self.fname, self.ofile)
+      tgt_file = self.ofile
 
-    with open(self.fname, 'r+b') as f:
+
+    with open(tgt_file, 'r+b') as f:
       mm = mmap.mmap(f.fileno(), 0)
       for patch in self.patches:
         pos = patch.pos
@@ -638,8 +692,12 @@ class FilePatcher:
 
   def patch_one_ins(self, addr, content):
     one_ins = self.elf_file.get_one_ins(addr)
+
+    if isinstance(content, str):
+      content = self.mc.get_disassembly(content, addr=addr)
+
     assert len(content) <= len(one_ins.bytes
-                              ), 'Cannot replace %s with %s' % (one_ins.bytes, content)
+                              ), 'Cannot replace %s with %s(%s)' % (one_ins.bytes, one_ins.bytes, content)
     self.patch(addr, Format(content).pad(len(one_ins.bytes), self.mc.nop[0]).v)
 
   def nop_ins(self, addr):
@@ -915,3 +973,37 @@ class MCS51Compiler:
       res_dbg_file = self.compile_file(asm_file, cwd=temp_dir)
       debug_file = MCS51DebugFile().setup(filename=res_dbg_file)
     return debug_file.region.query().minv(F1).maxv(F2)
+
+global flags, cache
+flags = None
+cache = None
+
+
+def args(parser):
+  clist = CmdsList().add(test)
+  ActionHandler.Prepare(parser, clist.lst, global_action=0)
+
+
+def test(ctx):
+  mc = ThumbMachine()
+  res = mc.get_disassembly('''
+  adr %r2, START
+  mov %r1, #12;
+  mov %r1, #12;
+  mov %r1, #12;
+  mov %r1, #12;
+  mov %r1, #12;
+  .align
+START:
+  ''')
+  import codecs
+  mc.disp_ins(res)
+  print(codecs.encode(res, 'hex'))
+
+
+def main():
+  ctx = Attributize()
+  ActionHandler.Run(ctx)
+
+
+app()

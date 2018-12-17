@@ -96,6 +96,19 @@ class TypesHelper:
       return None
     return self.by_clang_type[kind]
 
+  def unpack_multiple(self, typ, buf, le=True):
+    if typ is None: return buf
+
+    if isinstance(typ, str): typ = self.by_name[typ]
+    if le:
+      buf = Format(buf).modpad(typ.size, 0).v
+    else:
+      buf = Format(buf).lmodpad(typ.size, 0).v
+
+    nentries = len(buf) // typ.size
+    pattern = f'{self.little_endian[le]}{nentries}{typ.pack}'
+    return struct.unpack(pattern, buf)
+
   def unpack(self, typ, buf, le=True):
     if typ is None: return buf
 

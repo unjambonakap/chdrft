@@ -1,5 +1,6 @@
 from . import sock
 import socket
+import ssl
 
 
 class Connection(sock.Sock):
@@ -33,3 +34,22 @@ class Server(sock.Sock):
     ns.setblocking(0)
     self.set_fileobj(ns)
     super()._connect()
+
+class SSLConnection(sock.Sock):
+
+  def __init__(self, host, port, cert, **kwargs):
+    self.conn = (host, port)
+    self.cert = cert
+    super().__init__(**kwargs)
+
+  def _connect(self):
+
+
+    s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    ssl_sock = ssl.wrap_socket(s, certfile=self.cert, keyfile=None, password=None)
+    ssl_sock.connect(self.conn)
+    ssl_sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
+    ssl_sock.setblocking(0)
+    self.set_fileobj(ssl_sock)
+    super()._connect()
+

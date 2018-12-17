@@ -9,6 +9,7 @@ import tempfile
 from inspect import signature
 import chdrft.utils.misc as cmisc
 from contextlib import ExitStack
+from chdrft.tools.xxd import xxd
 
 from chdrft.utils.misc import Attributize, lowercase_norm, Arch, struct_helper, csv_list
 
@@ -69,6 +70,7 @@ class BitFieldWrapper:
 
 
 class FieldGetSet:
+
   def __init__(self, obj, field):
     self.obj = obj
     self.field = field
@@ -78,6 +80,7 @@ class FieldGetSet:
 
   def getter(self):
     return getattr(self.obj, self.field)
+
 
 class BufferMemReader(MemReader):
 
@@ -120,6 +123,10 @@ class Regs:
       gs = FieldGetSet(self, field)
       self.__dict__.update(flags=BitFieldWrapper(desc, gettersetter=gs))
     self.__dict__.update(arch=arch, redirect=redirect, **kwargs)
+
+  def reg_list(self):
+    return self.arch.regs
+
 
   def __getattr__(self, name):
     return self.get(name)
@@ -205,7 +212,7 @@ class RegContext(ExitStack):
 
 class Memory:
 
-  def __init__(self, reader=None, writer=None, arch=None, minv=None, maxv=None, le=True):
+  def __init__(self, reader=None, writer=None, arch=None, minv=None, maxv=None, le=True, **kwargs):
     assert arch is not None
     if isinstance(reader, bytes) or isinstance(reader, bytearray):
       reader = BufferMemReader(reader)
@@ -243,18 +250,21 @@ class Memory:
 
     self.ptr_size = self.arch.reg_size
     if self.ptr_size == 8:
-      self.read_ptr = self.read_u64
-      self.write_ptr = self.write_u64
+      suf = 'u64'
     elif self.ptr_size == 4:
+      suf = 'u32'
       self.read_ptr = self.read_u32
       self.write_ptr = self.write_u32
     elif self.ptr_size == 2:
-      self.read_ptr = self.read_u16
-      self.write_ptr = self.write_u16
+      suf = 'u16'
     else:
       assert 0
-    self.read_funcs += csv_list('read,read2,unpack,read_u,read_ptr')
-    self.write_funcs += csv_list('write,write_u,write_ptr')
+    for typ in csv_list('read_,read_n,write_,write_n'):
+      fname = typ + 'ptr'
+      setattr(self, fname, getattr(self, typ + suf))
+
+    self.read_funcs += csv_list('read,read2,unpack,read_u')
+    self.write_funcs += csv_list('write,write_u')
     print('GOT LE >> ', le)
 
   def add_read_func(self, name, func):
@@ -274,30 +284,54 @@ class Memory:
     return self.arch.mc.get_one_ins(data, addr)
 
   def add_rw_funcs(self, prefix, fmt):
-    g, s, ng = self.make_funcs(fmt)
+    g, s, ng, ns = self.make_funcs(fmt)
     read_name = 'read_%s' % (prefix)
     read_n_name = 'read_n%s' % (prefix)
+    write_n_name = 'write_n%s' % (prefix)
     write_name = 'write_%s' % (prefix)
     self.add_read_func(read_name, g)
     self.add_read_func(read_n_name, ng)
     self.add_write_func(write_name, s)
+    self.add_write_func(write_n_name, ns)
 
   def make_funcs(self, fmt):
     fmt_size = struct.calcsize(fmt)
 
-    def g(addr):
+    def g(addr, ):
       y = self.reader(addr, fmt_size)
+      if y is not None: y = self.reader(addr, fmt_size * n)
       return struct.unpack(self.le_sgn + '%c' % fmt, y)[0]
 
-    def ng(addr, n):
-      y = self.reader(addr, fmt_size * n)
+    def ng(addr=None, n=None, sz=None, y=None):
+      if sz is not None: n = sz // fmt_size
+      if y is not None: y = self.reader(addr, fmt_size * n)
       return struct.unpack(self.le_sgn + '%d%c' % (n, fmt), y)
 
     def s(addr, val):
       packed_val = struct.pack(self.le_sgn + '%c' % fmt, val)
       self.writer(addr, packed_val)
 
-    return g, s, ng
+    def ns(addr, tb):
+      packed_val = struct.pack(self.le_sgn + '%d%c' % (len(tb), fmt), tb)
+      self.writer(addr, packed_val)
+
+    return g, s, ng, ns
+
+  def xxd(self, addr, sz, word_size=None, endian='little', num_cols=4):
+    if word_size is None:
+      word_size = self.arch.reg_size
+    return xxd.FromBuf(
+        self.read(addr, sz),
+        cmisc.Attributize(
+            reverse=0,
+            num_cols=num_cols,
+            head=-1,
+            skip_head=0,
+            word_size=word_size,
+            endian=endian,
+            offset=addr,
+        )
+    )
 
   # read by size, automatically cast to number
   def read_u(self, addr, size):
@@ -408,37 +442,49 @@ class NonRandomMemory(Memory):
 
 class Stack:
 
-  def __init__(self, regs, mem, arch, obj=None):
+  def __init__(self, regs, mem, arch, obj=None, fixed_sp=None):
     self.regs = regs
+    self.fixed_sp = fixed_sp
     self.mem = mem
     self.arch = arch
     self.obj = obj
 
-  def write_one(self, addr, e):
+  def _write_one(self, addr, e):
     self.mem.write_ptr(addr, e)
 
-  def read_one(self, addr):
+  def _read_one(self, addr):
     return self.mem.read_ptr(addr)
 
+  @property
+  def sp(self):
+    if self.fixed_sp: return self.fixed_sp
+    return self.regs.stack_pointer
+
+  @sp.setter
+  def sp(self, v):
+    if self.fixed_sp:
+      self.fixed_sp = v
+    else:
+      self.regs.stack_pointer = v
+
   def get_addr(self, off=0):
-    addr = self.regs.stack_pointer
+    addr = self.sp
     if self.obj and self.obj.real_mode:
-      addr =  self.obj.stack_lin(addr)
+      addr = self.obj.stack_lin(addr)
     addr += off * self.arch.reg_size
     return addr
 
-
   def push(self, e):
     if isinstance(e, int):
-      self.regs.stack_pointer -= self.arch.reg_size
-      self.write_one(self.get_addr(), e)
+      self.sp -= self.arch.reg_size
+      self.set(0, e)
     else:
-      self.regs.stack_pointer -= len(e)
+      self.sp -= len(e)
       self.mem.write(self.get_addr(), e)
 
   def pop(self):
-    res = self.read_one(self.get_addr())
-    self.regs.stack_pointer += self.arch.reg_size
+    res = self.get(0)
+    self.sp += self.arch.reg_size
     return res
 
   def popn(self, n):
@@ -447,12 +493,11 @@ class Stack:
       res.append(self.pop())
     return res
 
-
   def get(self, off):
-    return self.read_one(self.get_addr(off))
+    return self._read_one(self.get_addr(off))
 
   def set(self, off, v):
-    return self.write_one(self.get_addr(off), v)
+    return self._write_one(self.get_addr(off), v)
 
 
 def binary_re(*arg):

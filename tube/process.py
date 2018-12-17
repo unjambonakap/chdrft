@@ -42,8 +42,7 @@ class Process(tube.Tube):
   def _recv(self, n, timeout):
     if self.proc.stdout.closed:
       raise EOFError
-    if not self._recv_ready(self.proc.stdout, timeout):
-      return b''
+    self._recv_ready(self.proc.stdout, timeout)
 
     res = self.proc.stdout.read(n)
     if len(res) == 0:

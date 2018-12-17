@@ -26,17 +26,17 @@ def fmt_num(v, n=None):
 class Display:
 
   @staticmethod
-  def regs_summary(regs, regs_list=None):
-    assert regs_list is not None
+  def regs_summary(regs, base_regs):
 
     per = 5
     s = ''
+    regs_list = base_regs.reg_list()
     for i in range(0, len(regs_list), per):
       for j in range(per):
         if j + i >= len(regs_list):
           break
         reg = regs_list[i + j]
-        reg_size = regs.reg_size(reg)
+        reg_size = base_regs.reg_size(reg)
         s += ('{}={:0' + str(reg_size * 2) + 'x}\t').format(reg, regs[reg])
       s += '\n'
     return s.rstrip()
@@ -216,11 +216,12 @@ class TraceEvent:
     self.write_event = []
     self.diff_regs = dict()
     self.raw_ins = ins
-    self.pc = regs[self.arch.reg_pc]
+    self.pc = regs.ins_pointer
     self.desc = self.mc.ins_str(self.mc.get_one_ins(ins, addr))
     self.stacks = []
     self.old_stacks = None
     self.diff_mode= diff_mode
+    self.base_regs =regs
 
     self.i_regs = self.extract_regs(regs)
     self.o_regs = None
@@ -264,7 +265,7 @@ class TraceEvent:
     data.append(Display.disp(self.read_event, name='ReadEvent'))
     data.append(Display.disp(self.write_event, name='WriteEvent'))
     if self.diff_mode: data.append(Display.diff_dicts(self.i_regs, self.o_regs, name='DiffRegs'))
-    else: data.append(Display.disp(self.o_regs, name='Regs', num_size=self.arch.reg_size))
+    else: data.append(Display.regs_summary(self.o_regs, self.base_regs))
 
     return Display.disp_lines(*data)
 

@@ -56,8 +56,7 @@ class FileLike(tube.Tube):
     if self.closed['recv']:
       raise EOFError
 
-    if not self._recv_ready(self.fileobj, timeout):
-      self._raise_timeout()
+    self._recv_ready(self.fileobj, timeout)
 
     res = self._do_read(n)
     if len(res) == 0:

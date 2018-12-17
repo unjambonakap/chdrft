@@ -4,6 +4,7 @@ import sys
 import inspect
 import argparse
 from chdrft.utils.misc import Attributize, is_python2, cwdpath, csv_list
+import chdrft.utils.misc as cmisc
 import pickle
 import subprocess as sp
 import glog
@@ -132,7 +133,7 @@ def run_cmdify(parser, lst):
 class ActionHandler:
   g_handler = None
 
-  def __init__(self, parser, cmds, init=None):
+  def __init__(self, parser, cmds, init=None, global_action=False):
     self.parser = parser
     self.cmds = {x.get_name(): x for x in cmds}
     parser.add_argument('--actions', type=str, default='')
@@ -146,6 +147,7 @@ class ActionHandler:
     self.flags = None
     self.stack = None
     self.init = init
+    self.global_action = global_action
 
 
   def do_proc(self, stack, flags, *args, **kwargs):
@@ -168,7 +170,7 @@ class ActionHandler:
           if output_file:
             output_file.write(res)
           if not flags.noaction_log_output:
-            glog.info('Action %s results: %s', action.name, res)
+            glog.info('Action %s results: %s', action, res)
           if flags.ret_syscode:
             if isinstance(res, bool): res = 1 if not res else 0
             sys.exit(res)
@@ -176,7 +178,8 @@ class ActionHandler:
         if flags.noctrlc_trace: pass
         else: raise e
 
-  def proc(self, flags, *args, **kwargs):
+  def proc(self, flags, caller_ctx, *args, **kwargs):
+    self.caller_ctx  =caller_ctx
     self.args = args
     self.kwargs = kwargs
     self.flags = flags
@@ -219,11 +222,13 @@ class ActionHandler:
     return actions
 
   def get_action(self, action_name):
+    if self.global_action: return self.caller_ctx[action_name]
     assert action_name in self.cmds, 'Action not known %s, lst=(%s)' % (action_name, self.cmds.keys())
     return self.cmds[action_name]
 
   def execute_action(self, action):
-
+    if callable(action):
+      return action(*self.args, **self.kwargs)
     return action.func(*self.args, **self.kwargs)
 
   @staticmethod
@@ -233,7 +238,8 @@ class ActionHandler:
   @staticmethod
   def Run(*args, **kwargs):
     from chdrft.main import app
-    ActionHandler.g_handler.proc(app.flags, *args, **kwargs)
+    _, caller_ctx = cmisc.get_n2_locals_and_globals()
+    ActionHandler.g_handler.proc(app.flags, caller_ctx, *args, **kwargs)
 
   @staticmethod
   def Reqs():

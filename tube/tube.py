@@ -11,6 +11,7 @@ from chdrft.utils.fmt import Format
 from contextlib import ExitStack
 import sys
 import threading
+import curses.ascii
 
 from datetime import datetime, timedelta
 
@@ -88,6 +89,8 @@ class Tube(ExitStack):
   def recv_fixed_size(self, size, timeout=None):
     return self.recv_until(lambda x: -1 if len(x) < size else size, timeout)
 
+  def readline(self):
+    return self.recv_until(b'\n').rstrip()
 
   def recv_until(self, matcher, timeout=None):
     timeout = self.normalize_timeout(timeout)
@@ -150,9 +153,10 @@ class Tube(ExitStack):
       try:
         tmp = None
         tmp = self.recv_base(self.recv_size, timeout)
-        glog.debug('Trashing %s', tmp)
       except EOFError:
         self.eof = 1
+        pass
+      except misc.TimeoutException:
         pass
       except:
         raise
@@ -214,32 +218,45 @@ class Tube(ExitStack):
     if timeout is None:
       return select.select([fd], [], []) == ([fd], [], [])
     else:
-      return select.select([fd], [], [], timeout.get_sec()) == \
+      res =  select.select([fd], [], [], timeout.get_sec()) == \
                 ([fd], [], [])
+      if not res:
+        self._raise_timeout()
 
 
-  def interactive(self, use_input=True, safe_print=1):
+  def interactive(self, use_input=True, full_print=0, outfile=None, stop_msg=b'KAPPAQUIT'):
 
     print('Starting interactive mode >> ')
     done = threading.Event()
     def recv_func():
       while not done.is_set() and not self.eof:
         dx = self.recv_timeout(timeout=0.1)
-        if dx: 
-          if safe_print:
+        if outfile:
+          outfile.write(dx)
+        if dx:
+          if full_print:
             print(dx)
           else:
-            print(dx.decode(), end='')
+            repl = bytearray()
+            for x in dx:
+              if curses.ascii.isascii(x): repl.append(x)
+              else: repl.append(ord('.'))
+            print(repl.decode(), end='')
+            sys.stdin.flush()
 
     recv_thread = threading.Thread(target=recv_func)
     recv_thread.start()
 
+    sent = bytearray()
     try:
       while True:
         if use_input:
-          d = input('>>') + '\n'
+          d = input('>> ') + '\n'
         else:
           d = sys.stdin.read(1)
+        if outfile: outfile.flush()
+        sent.extend(d.encode())
+        if sent.find(stop_msg) != -1: break
         self.send(d)
     except Exception as e:
       tb.print_exc(e)

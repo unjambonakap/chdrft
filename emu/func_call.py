@@ -10,6 +10,7 @@ from chdrft.emu.base import Stack
 
 from contextlib import ExitStack
 import ctypes
+import chdrft.utils.misc as cmisc
 
 
 class FuncCallWrapper:
@@ -18,6 +19,7 @@ class FuncCallWrapper:
     self.typ = typ
     self.addr = addr
     self.caller = caller
+    assert caller is not None
 
   def __call__(self, *args):
     return self.caller(self.addr, *args)
@@ -25,18 +27,22 @@ class FuncCallWrapper:
 
 class FuncCallWrapperGen:
 
-  def __init__(self, elffile=None, lib=None, code_db=None, caller=None):
+  def __init__(self, elffile=None, lib=None, code_db=None, caller=None, name_to_addr={}):
     self.lib = lib
     self.elffile = elffile
     self.code_db = code_db
     self.caller = caller
+    self.name_to_addr = name_to_addr
 
   def find_address(self, name):
     if self.lib is not None:
       a = getattr(self.lib, name)
       a = ctypes.cast(a, ctypes.c_void_p)
       return a.value
+    elif name in self.name_to_addr:
+      return self.name_to_addr[name]
     else:
+      assert self.elffile is not None, name
       return self.elffile.get_symbol(name)
 
   def find_typ(self, name):
@@ -63,10 +69,22 @@ class MachineCallerBase:
       return self.regs[self.arch.call_data.reg_call[i]]
     return self.stack.get(i - nregcall)
 
+  def set_arg(self, i, v):
+    nregcall=len(self.arch.call_data.reg_call)
+    if nregcall >= i:
+      self.regs[self.arch.call_data.reg_call[i]] = v
+    else: self.stack.set(i - nregcall, v)
+
+
+  @property
+  def args(self):
+    return cmisc.CustomClass(setitem=self.set_arg, getitem=self.get_arg)
+
   def prepare(self, func, *args, ret_to_pad=True):
     if ret_to_pad: ret_pc = self.ret_hook_addr
-    else: ret_pc = self.regs[self.arch.reg_pc]
-    self.regs.ins_pointer = func
+    else: ret_pc = self.regs.ins_pointer
+    ret_pc = self.arch.call_data.norm_func_addr(ret_pc)
+    self.regs.ins_pointer = self.arch.call_data.norm_func_addr(func)
 
     rem = []
     for i, arg in enumerate(args):
@@ -76,7 +94,7 @@ class MachineCallerBase:
     for e in rem[::-1]:
       self.stack.push(e)
 
-    if self.arch.call_data.has_link: self.regs[self.arch.reg_link] = ret_pc
+    if self.arch.call_data.get('has_link', True): self.regs[self.arch.reg_link] = ret_pc
     else: self.stack.push(ret_pc)
 
     self.runner(ret_pc)
@@ -217,11 +235,16 @@ class AsyncFunctionCaller:
 
   def __init__(self, allocator, fcgen=None):
     self.allocator = allocator
+    if fcgen is None: fcgen = FuncCallWrapperGen()
     self.fcgen = fcgen
     self.coroutine = None
 
+  def reset_fcgen(self, **kwargs):
+    self.fcgen = FuncCallWrapperGen(**kwargs)
+
   def __getattr__(self, name):
     func = self.fcgen.get(name)
+    assert func is not None, name
     return lambda *args, **kwargs: self.do_call(func, *args, **kwargs)
 
   def do_call(self, func, *args, **kwargs):
@@ -232,6 +255,7 @@ class AsyncFunctionCaller:
     return next(self.coroutine)
 
   def call_func(self, func, *args, **kwargs):
+    print('CALLFUNC ', func, args)
     assert len(args) == 0 or len(kwargs) == 0
     if len(kwargs) != 0:
       args = []

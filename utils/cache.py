@@ -7,6 +7,7 @@ import shutil
 import traceback as tb
 import hashlib
 import fnmatch
+import pickle
 
 global global_cache
 global_cache = None
@@ -146,26 +147,48 @@ class FileCacheDB(CacheDB):
       filename = self.default_cache_filename
     self._cache_filename = filename
 
+
+  def write_cache(self, content):
+    from chdrft.main import app
+    if app.flags and app.flags.disable_cache: return
+    with open(self._cache_filename, 'wb') as f:
+      if app.flags and app.flags.pickle_cache:
+        pickle.dump(content, f)
+      else:
+        f.write(self._json_util.encode(content).encode())
+
+  def read_cache(self, f):
+    from chdrft.main import app
+    if app.flags and app.flags.pickle_cache:
+      return pickle.load(f)
+    else:
+      x = f.read().decode()
+      if not x: return {}
+      return self._json_util.decode(x)
+
+
   def do_enter(self):
     if not os.path.exists(self._cache_filename):
-      with open(self._cache_filename, 'w') as f:
-        f.write(self._json_util.encode({}))
+      self.write_cache({})
 
-    with open(self._cache_filename, 'r') as f:
-      if self._recompute:
-        cache = {}
-      else:
-        cache = self._json_util.decode(f.read())
+    from chdrft.main import app
+    if app.flags and app.flags.disable_cache:
+      cache = {}
+    else:
+      with open(self._cache_filename, 'rb') as f:
+        if self._recompute:
+          cache = {}
+        else:
+          cache =self.read_cache(f)
     return cache
 
   def do_exit(self):
     from chdrft.main import app
-    if app.flags and app.flags.no_update_cache: return
+    if app.flags and (app.flags.disable_cache or app.flags.no_update_cache): return
     shutil.copy2(self._cache_filename, self._cache_filename + '.bak')
 
     try:
-      with open(self._cache_filename, 'w') as f:
-        f.write(self._json_util.encode(self._cache))
+      self.write_cache(self._cache)
     except:
       os.remove(self._cache_filename)
       tb.print_exc()
@@ -312,6 +335,7 @@ def cache_argparse(parser):
   parser.add_argument('--recompute', type=lambda x: x.split(','), default=[])
   parser.add_argument('--disable-cache', action='store_true')
   parser.add_argument('--no-update-cache', action='store_true')
+  parser.add_argument('--pickle-cache', action='store_true')
 
 
 if __name__ == '__main__':

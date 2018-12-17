@@ -1,6 +1,7 @@
 import os
 import re
 from asq.initiators import query
+import chdrft.utils.misc as cmisc
 
 
 class MemoryRegionType:
@@ -122,6 +123,7 @@ class MemoryRegions:
     return self.regions
 
   def get_elf_entry(self, pattern):
+    pattern = cmisc.PatternMatcher.smart(pattern)
     return query(self.regions).where(lambda u: pattern(u.file)).order_by(
         lambda u: u.start_addr).to_list()[0]
 
@@ -145,9 +147,11 @@ class ProcHelper:
   maps_file = '/proc/%d/maps'
   exe_file = '/proc/%d/exe'
   status_file = '/proc/%d/status'
+  mem_file = '/proc/%d/mem'
 
   def __init__(self, pid=None):
     self.pid = pid
+    self.mem_file = ProcHelper.mem_file % pid
 
   def get_map_content(self):
     with open(self.maps_file % self.pid, 'r') as f:
@@ -159,6 +163,9 @@ class ProcHelper:
     res = MemoryRegions()
     res.build_from_maps(maps)
     return res
+
+  def get_exe_path(self):
+    return os.readlink(self.exe_file % self.pid)
 
   def get_exe_path(self):
     return os.readlink(self.exe_file % self.pid)

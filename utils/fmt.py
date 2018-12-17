@@ -117,6 +117,10 @@ class Format(object):
     self.v=type(val)(self.v)
     return self
 
+  def lmodpad(self, mod, fill):
+    rem = -len(self.v) % mod
+    return self.lpad(rem + len(self.v), fill)
+
   def modpad(self, mod, fill):
     rem = -len(self.v) % mod
     return self.pad(rem + len(self.v), fill)

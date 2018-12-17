@@ -42,9 +42,7 @@ class Serial(tube.Tube):
       glog.info('Serial closed, raising eof')
       raise EOFError
 
-    if not self._recv_ready(self.serial, timeout):
-      glog.debug('Serial recv not ready')
-      self._raise_timeout()
+    self._recv_ready(self.serial, timeout)
 
     try:
       want = min(n, self.serial.inWaiting())

@@ -18,6 +18,7 @@ class xxd:
     parser.add_argument('--skip_head', type=int, default=0)
     parser.add_argument('--word_size', type=int, default=4)
     parser.add_argument('--endian', type=str, choices=['little', 'big'], default='little')
+    parser.add_argument('--offset', type=int, default=0)
 
   @staticmethod
   def FromBuf(buf, args):
@@ -75,7 +76,7 @@ class xxd:
     else:
       assert False, 'bad word size: %d' % self.word_size
 
-    off = 0
+    off = self.args.offset
     eof = False
     skip_headc = self.args.skip_head
     headc = self.args.head

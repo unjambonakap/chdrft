@@ -331,7 +331,7 @@ class WafOpenSSL(WafPkg):
 class WafOpenCV(WafPkg):
 
   def __init__(self):
-    super().__init__('opencv')
+    super().__init__('opencv4')
 
 
 class WafZeroMQ(WafPkg):

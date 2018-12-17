@@ -118,7 +118,7 @@ def mod1(v, mod):
 
 
 def xorlist(a, b):
-  res = [x ^ y for x, y in zip(a, b)]
+  res = type(a)([x ^ y for x, y in zip(a, b)])
   return res
 
 
@@ -328,6 +328,16 @@ class Dict(dict):
     tmp = Dict(self)
     tmp.update(x)
     return tmp
+
+class CustomClass:
+  def __init__(self, setitem=None, getitem=None, **kwargs):
+    self.setitem = setitem
+    self.getitem = getitem
+    self.__dict__.update(**kwargs)
+  def __setitem__(self, k, v):
+    self.setitem(k, v)
+  def __getitem__(self, k):
+    return self.getitem(k)
 
 
 class DictWithDefault(OrderedDict):
@@ -605,6 +615,17 @@ class PatternMatcher:
     return matcher
 
   @staticmethod
+  def smart(matcher, re=0):
+    if re:
+      return PatternMatcher.fromre(matcher)
+
+    if isinstance(matcher, str):
+      return PatternMatcher.fromstr(matcher)
+    elif isinstance(matcher, bytes):
+      return PatternMatcher.frombytes(matcher)
+    return matcher
+
+  @staticmethod
   def frombytes(s):
 
     def checker(data):
@@ -622,7 +643,30 @@ class PatternMatcher:
     return PatternMatcher(checker, start)
 
   @staticmethod
+  def fromstr(s):
+    # does not change :)
+    return PatternMatcher.frombytes(s)
+
+  @staticmethod
   def fromre(reg):
+    r = re.compile(reg)
+
+    def checker(data):
+      x = r.search(data)
+      if x is None:
+        return None
+      return x.end()
+
+    def start(data):
+      x = r.search(data)
+      if x is None:
+        return None
+      return x.start()
+
+    return PatternMatcher(checker, start)
+
+  @staticmethod
+  def fromstr(reg):
     r = re.compile(reg)
 
     def checker(data):
@@ -1077,7 +1121,6 @@ if sys.version_info >= (3, 0):
     def push_args(self, *args):
       if self.writer is None:
         #, delimiter=',', quotechar='|'
-        print('FUU U ', self.fil)
         self.writer = csv.writer(self.fil)
       self.writer.writerow(args)
 
@@ -1101,5 +1144,24 @@ if sys.version_info >= (3, 0):
     def push_vars(self, var_lst, n=0):
       lst = vars_to_dict(to_list(var_lst), n=n+1)
       self.push_dict(lst)
+
+def gcd_list(lst):
+  import gmpy2
+  res = 0
+  for i in lst:
+    res = gmpy2.gcd(res, i)
+  return res
+
+def get_uniq(x):
+  x = list(x)
+  assert len(x) == 1, str(x)
+  return x[0]
+
+def find_in_list(lst, sublist):
+  for i in range(len(lst)-len(sublist)+1):
+    for j in range(len(sublist)):
+      if lst[i+j] != sublist[j]: break
+    else: yield i
+
 
 

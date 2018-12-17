@@ -67,7 +67,7 @@ class ElfUtils:
     if dyn_section and load_sym:
       for sym in dyn_section.raw.iter_symbols():
         #print(sym.name, hex(sym['st_value']))
-        self.dyn_symbols[sym.name] = sym['st_value']
+        self.dyn_symbols[self.sanitize_sym(sym.name)] = sym['st_value']
 
     for rel in ('.rela.plt', '.rel.plt'):
       rel_section = self.get_section(rel)
@@ -78,7 +78,7 @@ class ElfUtils:
       for rel in rel_section.raw.iter_relocations():
         sym = sym_tab.get_symbol(rel['r_info_sym'])
         off = rel['r_offset']
-        self.relocs[sym.name] = off
+        self.relocs[self.sanitize_sym(sym.name)] = off
 
     sym_section = self.get_section('.symtab')
     if sym_section and load_sym:
@@ -178,7 +178,7 @@ class ElfUtils:
     return sym
 
   def get_entry_address(self):
-    return self.elf.header['e_entry']
+    return self.elf.header['e_entry'] + self.offset
 
   def get_dynamic_tag(self, tag):
     return self.dynamic_tags[tag]
@@ -245,6 +245,7 @@ class ElfUtils:
 
   # Map addr -> file offset
   def get_pos(self, addr):
+    addr -= self.offset
     section = self.find_section(addr)
     if section is not None: return addr - section['sh_addr'] + section['sh_offset']
 
