@@ -5,6 +5,7 @@ import json
 import pandas
 import yaml
 from asq.initiators import query
+from chdrft.utils.arg_gram import LazyConf
 
 
 class Format(object):
@@ -24,6 +25,10 @@ class Format(object):
 
   def toint(self, base=None):
     self.v = to_int(self.v, base)
+    return self
+
+  def from_conf(self):
+    self.v = LazyConf.ParseFromString(self.v)
     return self
 
   def from_yaml(self):
@@ -87,13 +92,15 @@ class Format(object):
       self.v = bytes([fill] * n) + v
     elif isinstance(v, bytearray):
       self.v = bytearray([fill] * n) + v
+    elif isinstance(v, str):
+      self.v = fill * n + v
     else:
       assert 0, 'cant pad on %s' % type(self.v)
 
     self.v = self.v[:oldn]
 
     return self
-  def pad(self, n, fill):
+  def pad(self, n, fill, force_size=1):
     v = self.v
     oldn = n
     import numpy as np
@@ -104,12 +111,14 @@ class Format(object):
       self.v = v + bytes([fill] * n)
     elif isinstance(v, bytearray):
       self.v = v + bytearray([fill] * n)
+    elif isinstance(v, str):
+      self.v = v + fill * n
     elif isinstance(v, np.ndarray):
       self.v = np.pad(v, (0,n), 'constant', constant_values=(0,0))
     else:
       assert 0, 'cant pad on %s, content=%s' % (type(self.v), self.v)
 
-    self.v = self.v[:oldn]
+    if force_size: self.v = self.v[:oldn]
 
     return self
 

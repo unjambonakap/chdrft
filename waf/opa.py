@@ -712,7 +712,7 @@ class ClOpaWaf:
     else:
       ctx.env.append_value('CFLAGS', ['-fPIC', '-Wreturn-type',])
       ctx.env.append_value('CXXFLAGS',
-                           ['-fPIC', '-std=c++14', '-Wreturn-type', '-Wno-stringop-overflow', '-Wno-unknown-warning-option'
+                           ['-fPIC', '-std=c++14', '-Wreturn-type', '-Wno-stringop-overflow', '-Wno-unknown-warning-option', '-Wno-attributes',
                              ])
 
       ctx.env.append_value('CFLAGS', ['-Wno-error'])
@@ -1125,12 +1125,18 @@ class BuildContext2(BuildContext):
 class InstallContext2(InstallContext):
 
   get_targets = override_get_targets
+  def do_install(self, src, tgt, **kw):
+    super().do_install(src, tgt, **kw)
+    self.installs.append(str(tgt))
 
   def execute(self):
+    self.installs = []
     with app.global_context:
 
       app.global_context.callback(lambda *args: print('CLEANUP MOFO'))
       super().execute()
+      with open(os.path.join(Options.options.out, 'installs.tgt'), 'w') as f:
+        f.write('\n'.join(self.installs))
 
 
 class RunnerContext(BuildContext2):

@@ -22,7 +22,7 @@ def args(parser):
   clist = CmdsList()
   ActionHandler.Prepare(parser, clist.lst, global_action=1)
 
-def run_notebook(notebook_dir='./', background=False, current_pid=-1):
+def run_notebook(*args, notebook_dir='./', background=False, current_pid=-1):
 
   print('Running notebook for ', current_pid)
   proc = sp.Popen(
@@ -45,22 +45,24 @@ def run_notebook(notebook_dir='./', background=False, current_pid=-1):
       except KeyboardInterrupt:
         pass
 
-def create_kernel(runid='default', do_run_notebook=False, **kwargs):
+def create_kernel(runid=None, do_run_notebook=False, **kwargs):
+  if runid is None: runid = app.flags.runid
   ipkernel = OpaKernelApp.instance()
   ipkernel.runid = runid
 
 
 
   kwargs.update(current_pid=os.getpid())
+  if do_run_notebook:
+    kwargs = dict(kwargs)
+    kwargs['runid'] = app.flags.runid
+    threading.Thread(target=run_notebook, kwargs=kwargs).start()
 
   ipkernel.initialize(['python', '--matplotlib=qt'])
   ipkernel.user_module, ipkernel.user_ns = extract_module_locals(1)
   ipkernel.shell.set_completer_frame()
-  if do_run_notebook:
-    kwargs = dict(kwargs)
-    kwargs['runid'] = flags.runid
-    threading.Thread(target=run_notebook, kwargs=kwargs).start()
 
+  time.sleep(1)
   ipkernel.start()
 
 

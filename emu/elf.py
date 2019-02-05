@@ -1,6 +1,6 @@
 import io
 import elftools.elf.elffile as EF
-from elftools.elf.sections import SymbolTableSection
+from elftools.elf.sections import SymbolTableSection, NullSection
 from elftools.elf.dynamic import DynamicSection
 from elftools.elf.relocation import RelocationSection
 from elftools.elf.constants import P_FLAGS
@@ -75,10 +75,11 @@ class ElfUtils:
         continue
       sym_tab = elf.get_section(rel_section['sh_link'])
 
-      for rel in rel_section.raw.iter_relocations():
-        sym = sym_tab.get_symbol(rel['r_info_sym'])
-        off = rel['r_offset']
-        self.relocs[self.sanitize_sym(sym.name)] = off
+      if not isinstance(sym_tab, NullSection):
+        for rel in rel_section.raw.iter_relocations():
+          sym = sym_tab.get_symbol(rel['r_info_sym'])
+          off = rel['r_offset']
+          self.relocs[self.sanitize_sym(sym.name)] = off
 
     sym_section = self.get_section('.symtab')
     if sym_section and load_sym:

@@ -47,6 +47,7 @@ class Swig:
         'opa_algo_swig',
         'opa_engine_swig',
         'opa_wrapper_swig',
+        'opa_dsp_swig',
     ]
     self._initialized = True
 

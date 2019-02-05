@@ -18,10 +18,14 @@ from collections import OrderedDict, defaultdict
 import csv
 import fnmatch
 import glob
+import numpy as np
+
+
 
 def to_str(x):
   if isinstance(x, str): return x
   return x.decode()
+
 
 try:
   from enum import Enum
@@ -44,7 +48,6 @@ if is_python2:
     from builtins import *
   except:
     pass
-
 
 misc_backend = None
 chdrft_executor = None
@@ -81,10 +84,14 @@ try:
 except:
   pass
 
+
 def argmax(iterable, f=lambda x: x):
   return max(enumerate(iterable), key=lambda x: f(x[1]))[0]
+
+
 def argmin(iterable, f=lambda x: x):
   return min(enumerate(iterable), key=lambda x: f(x[1]))[0]
+
 
 def align(v, pw):
   if pw <= 0: pw = 1
@@ -96,7 +103,7 @@ def mask(pw):
 
 
 def imask(pw, modpw=None):
-  v= ~((1 << pw) - 1)
+  v = ~((1 << pw) - 1)
   if modpw is not None:
     v = v & mask(modpw)
   return v
@@ -135,25 +142,28 @@ def lowbit(b):
 def sign(x):
   return 1 if x >= 0 else -1
 
+
 def bit2sign(x):
   return [1, -1][x]
+
 
 def cntbit(x):
   if x == 0: return 0
   return 1 + cntbit(x & (x - 1))
 
+
 def ror(v, n, sz):
-    n %= sz
-    v1 = (v >> n)
-    v2 = (v << (sz - n)) % (2 ** sz)
-    return v2 | v1
+  n %= sz
+  v1 = (v >> n)
+  v2 = (v << (sz - n)) % (2**sz)
+  return v2 | v1
 
 
 def rol(v, n, sz):
-    n %= sz
-    v1 = (v << n) % (2 ** sz)
-    v2 = v >> (sz - n)
-    return v2 | v1
+  n %= sz
+  v1 = (v << n) % (2**sz)
+  v2 = v >> (sz - n)
+  return v2 | v1
 
 
 def is_list(x):
@@ -165,13 +175,13 @@ def is_list(x):
 
 
 def flatten(a, explode=False, depth=-1):
-  if depth==0: return a
+  if depth == 0: return a
   if not is_list(a):
     return to_list(a, explode)
 
   lst = []
   for x in to_list(a):
-    lst.extend(flatten(x, depth=depth-1))
+    lst.extend(flatten(x, depth=depth - 1))
   return lst
 
 
@@ -287,17 +297,19 @@ def proc_path(path):
 def cwdpath(path):
   return proc_path(os.path.join(os.getcwd(), path))
 
+
 def get_n2_locals_and_globals(n=0):
   p2 = inspect.currentframe().f_back.f_back
-  for i in range(n): p2= p2.f_back
+  for i in range(n):
+    p2 = p2.f_back
   return p2.f_locals, p2.f_globals
 
 
 def path_here(*path):
   frame = inspect.currentframe().f_back
-  while not '__file__' in frame.f_locals:
+  while not '__file__' in frame.f_globals:
     frame = frame.f_back
-  return proc_path(os.path.join(os.path.split(frame.f_locals['__file__'])[0], *path))
+  return proc_path(os.path.join(os.path.split(frame.f_globals['__file__'])[0], *path))
 
 
 def path_from_script(script, *path):
@@ -329,13 +341,17 @@ class Dict(dict):
     tmp.update(x)
     return tmp
 
+
 class CustomClass:
+
   def __init__(self, setitem=None, getitem=None, **kwargs):
     self.setitem = setitem
     self.getitem = getitem
     self.__dict__.update(**kwargs)
+
   def __setitem__(self, k, v):
     self.setitem(k, v)
+
   def __getitem__(self, k):
     return self.getitem(k)
 
@@ -384,18 +400,21 @@ class DictUtil:
     d[key] = val
     return val
 
+
 class Attributize(dict):
 
-  def __init__(self,
-               elem=None,
-               other=None,
-               default=None,
-               default_none=False,
-               handler=None,
-               key_norm=None,
-               affect_elem=True,
-               repr_blacklist_keys=[],
-               **rem):
+  def __init__(
+      self,
+      elem=None,
+      other=None,
+      default=None,
+      default_none=False,
+      handler=None,
+      key_norm=None,
+      affect_elem=True,
+      repr_blacklist_keys=[],
+      **rem
+  ):
     if elem is None:
       if (default is not None) or default_none:
         elem = DictWithDefault(lambda: default, **rem)
@@ -437,7 +456,6 @@ class Attributize(dict):
 
   def values(self):
     return self._elem.values()
-
 
   def find_if_str(self, k):
     if isinstance(k, str): return self[k]
@@ -523,8 +541,8 @@ class Attributize(dict):
     #return yaml.dump(dict(self._elem), default_flow_style=True)
 
   def skeleton(self):
-    res=Attributize()
-    for k,v in self.items():
+    res = Attributize()
+    for k, v in self.items():
       if isinstance(v, Attributize):
         res[k] = v.skeleton()
       else:
@@ -537,11 +555,11 @@ class Attributize(dict):
     if isinstance(e, dict):
       res = Attributize(**params)
       for k, v in e.items():
-        res[k] = Attributize.RecursiveImport(v)
+        res[k] = Attributize.RecursiveImport(v, **params)
     elif is_list(e):
       res = []
       for x in e:
-        res.append(Attributize.RecursiveImport(x))
+        res.append(Attributize.RecursiveImport(x, **params))
     return res
 
   @staticmethod
@@ -554,9 +572,11 @@ Attr = Attributize
 
 
 class Remap:
+
   def __init__(self):
     self.rmp = {}
     self.inv = []
+
   def get(self, x):
     if x in self.rmp:
       return self.rmp[x]
@@ -565,7 +585,9 @@ class Remap:
     self.rmp[x] = cid
     self.inv.append(x)
     return cid
-  def rget(self, id): return self.inv[id]
+
+  def rget(self, id):
+    return self.inv[id]
 
   @property
   def n(self):
@@ -573,6 +595,7 @@ class Remap:
 
   def __contains__(self, x):
     return x in self.rmp
+
 
 if sys.version_info >= (3, 0):
 
@@ -683,8 +706,10 @@ class PatternMatcher:
 
     return PatternMatcher(checker, start)
 
+
 class TwoPatternMatcher:
-  def __init__(self, a,b):
+
+  def __init__(self, a, b):
     self.a = PatternMatcher.Normalize(a)
     self.b = PatternMatcher.Normalize(b)
     self.a_check = False
@@ -696,7 +721,7 @@ class TwoPatternMatcher:
       self.a_check = True
       return ar
 
-    br =  self.b(data)
+    br = self.b(data)
     if br is not None:
       self.b_check = True
       return br
@@ -704,8 +729,6 @@ class TwoPatternMatcher:
 
   def __call__(self, data):
     return self.check(data)
-
-
 
 
 class SeccompFilters:
@@ -885,7 +908,7 @@ class BitMapper:
 
   def __init__(self, desc):
     self.desc = desc
-    self.field_to_pos = dict({v:i for i,v in enumerate(desc)})
+    self.field_to_pos = dict({v: i for i, v in enumerate(desc)})
 
   def from_value(self, value):
     res = Attributize(default=lambda: 0)
@@ -907,6 +930,7 @@ def read_file_or_buf(filename=None, data=None):
   if filename is not None:
     return open(filename, 'rb').read()
   return data
+
 
 class StructHelper:
 
@@ -959,7 +983,8 @@ class StructHelper:
 
 
 class CircularBufferView:
-  def __init__(self,  buf, pos=None, stride=1, stop=None):
+
+  def __init__(self, buf, pos=None, stride=1, stop=None):
     self.buf = buf
     self.n = len(buf)
     if stop is None: stop = self.n
@@ -971,7 +996,7 @@ class CircularBufferView:
       if stride == -1: pos = self.n - 1
     self.i = -1
     self.pos = pos
-    self.stride =stride
+    self.stride = stride
 
   def __iter__(self):
     return self
@@ -982,7 +1007,7 @@ class CircularBufferView:
     return self
 
   def id(self, p=0):
-    return (self.pos + (self.i + p) * self.stride)% self.n
+    return (self.pos + (self.i + p) * self.stride) % self.n
 
   def get(self, p=0):
     return self.buf[self.id(p=p)]
@@ -990,10 +1015,11 @@ class CircularBufferView:
 
 def dict_oneline(d):
   res = []
-  for k,v in d.items():
+  for k, v in d.items():
     res.append(k + '=' + str(v))
   s = ', '.join(res)
   return s
+
 
 def vars_to_dict(var_lst, n=0):
   var_lst = to_list(var_lst)
@@ -1003,54 +1029,60 @@ def vars_to_dict(var_lst, n=0):
     res[var] = eval(var, pglob, ploc)
   return res
 
+
 def display_vars_str(var_lst, n=0):
   var_lst = to_list(var_lst)
-  return dict_oneline(vars_to_dict(var_lst, n=n+1))
+  return dict_oneline(vars_to_dict(var_lst, n=n + 1))
+
 
 def display_vars(var_lst, n=0, **kwargs):
-  print(display_vars_str(var_lst, n=n+1), **kwargs)
-
-
+  print(display_vars_str(var_lst, n=n + 1), **kwargs)
 
 
 #TODO: switch to
 # from string import Template
 # Template('${TESTABC} {not chaing}').substitute(TESTABC=12)
 
+
 def multi_replace(s, d):
-  return  re.sub(r'\b(' + '|'.join(d.keys()) + r')\b', lambda x: str(d[x.group()]), s)
+  return re.sub(r'\b(' + '|'.join(d.keys()) + r')\b', lambda x: str(d[x.group()]), s)
 
 
 def template_replace(s, **d):
   from string import Template
   return Template(s).substitute(**d)
 
+
 def template_replace_safe(s, **d):
   from string import Template
   return Template(s).safe_substitute(**d)
+
 
 def is_interactive():
   import __main__ as main
   return not hasattr(main, '__file__')
 
+
 def filter_glob_list(lst, globs, blacklist_default=True):
   if isinstance(globs, str): globs = [globs]
   globs = list(globs)
   for entry in lst:
-    if len(globs) == 0 and not  blacklist_default: yield entry
+    if len(globs) == 0 and not blacklist_default: yield entry
 
     for pattern in globs:
       if fnmatch.fnmatch(entry, pattern):
         yield entry
         break
 
+
 class InfGenerator:
+
   def __init__(self, cb):
     self.cb = cb
     self.acc = self.gen()
 
   def __call__(self):
-    pos=next(self.acc)
+    pos = next(self.acc)
     return self.cb[pos]
 
   def gen(self):
@@ -1061,7 +1093,6 @@ class InfGenerator:
       for i in range(1, n, 2):
         yield i / n
       n *= 2
-
 
 
 def get_input(globs):
@@ -1076,23 +1107,28 @@ def get_input(globs):
 
 struct_helper = StructHelper()
 
-BitOps = Attributize(align=align,
-                     mask=mask,
-                     imask=imask,
-                     bit=bit,
-                     ibit=ibit,
-                     setb=setb,
-                     lowbit=lowbit,
-                     cntbit=cntbit,
-                     bit2sign=bit2sign,
-                     mod1=mod1,
-                     sign=sign,
-                     xorlist=xorlist,
-                     ror=ror,
-                     rol=rol,
-                     )
+BitOps = Attributize(
+    align=align,
+    mask=mask,
+    imask=imask,
+    bit=bit,
+    ibit=ibit,
+    setb=setb,
+    lowbit=lowbit,
+    cntbit=cntbit,
+    bit2sign=bit2sign,
+    mod1=mod1,
+    sign=sign,
+    xorlist=xorlist,
+    ror=ror,
+    rol=rol,
+)
 
-Ops = Attributize(BitOps=BitOps, argmin=argmin, argmax=argmax,)
+Ops = Attributize(
+    BitOps=BitOps,
+    argmin=argmin,
+    argmax=argmax,
+)
 
 if sys.version_info >= (3, 0):
 
@@ -1105,6 +1141,7 @@ if sys.version_info >= (3, 0):
     thumb = 'thumb'
 
   class CsvWriterStream(ExitStack):
+
     def __init__(self, filename, log=False):
       super().__init__()
       self.filename = filename
@@ -1142,8 +1179,9 @@ if sys.version_info >= (3, 0):
       self.writer.writerow(data)
 
     def push_vars(self, var_lst, n=0):
-      lst = vars_to_dict(to_list(var_lst), n=n+1)
+      lst = vars_to_dict(to_list(var_lst), n=n + 1)
       self.push_dict(lst)
+
 
 def gcd_list(lst):
   import gmpy2
@@ -1152,16 +1190,36 @@ def gcd_list(lst):
     res = gmpy2.gcd(res, i)
   return res
 
+
 def get_uniq(x):
   x = list(x)
   assert len(x) == 1, str(x)
   return x[0]
 
+
 def find_in_list(lst, sublist):
-  for i in range(len(lst)-len(sublist)+1):
+  for i in range(len(lst) - len(sublist) + 1):
     for j in range(len(sublist)):
-      if lst[i+j] != sublist[j]: break
+      if lst[i + j] != sublist[j]: break
     else: yield i
 
 
+def int_to_bytes(a, byteorder='big'):
+  a = int(a)
+  return a.to_bytes(a.bit_length() + 7 >> 3, byteorder=byteorder)
+
+class FormatPrinter(pp.PrettyPrinter):
+
+  def __init__(self, formats, *args, **kwargs):
+    super().__init__(*args, **kwargs)
+    #self._dispatch[Attributize.__repr__] = self._pprint_dict
+    self.formats = formats
+
+  def format(self, obj, ctx, maxlvl, lvl):
+    if type(obj) in self.formats:
+      return self.formats[type(obj)] % obj, 1, 0
+    return super().format(obj, ctx, maxlvl, lvl)
+
+
+ppx = FormatPrinter({float: '%.4f', np.float64: "%.4f", int: "%06X"}, compact=1, width=200)
 

@@ -48,6 +48,8 @@ class App:
       if not is_python2:
         argcomplete.autocomplete(parser)
       flags = parser.parse_args()
+      if flags.other_args and flags.other_args[0] == '--':
+        flags.other_args = flags.other_args[1:]
       self.flags = flags
 
       glog.setLevel(flags.verbosity)

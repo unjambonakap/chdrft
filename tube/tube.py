@@ -101,13 +101,15 @@ class Tube(ExitStack):
       if pos is not None and pos != -1:
         self.buf = cur[pos:]
         return cur[:pos]
+      if self.eof:
+        raise EOFError
 
       try:
         tmp = self.recv_base(self.recv_size, timeout)
         self.buf = cur
         glog.debug('recv_until: %d >> got=%s, cur=%s', len(tmp), tmp, cur)
         if len(tmp) == 0:
-          return
+          continue
       except:
         self.buf = cur
         raise

@@ -427,12 +427,12 @@ class DataOp:
     return signal.lfilter(fx_b, fx_a, data)
 
   @staticmethod
-  def BinaryTransitionPos(data):
-    res = []
-    for i in range(1, len(data)):
-      if data[i] != data[i - 1]:
-        res.append(i)
-    return res
+  def BinaryTransitionPos(data, double_edge=1):
+    a = data[:-1]
+    b = data[1:]
+    res = a != b
+    if not double_edge: res = res & (a < b)
+    return np.where(res)[0] + 1
 
   @staticmethod
   def OOKMessages(data, debug=False):
@@ -521,8 +521,10 @@ class DataOp:
       x = swig.opa_or_swig
 
       bounds = swig.opa_or_swig.GridSearchBounds()
-      bounds.bounds.append(np.arange(sps_min, sps_max, (sps_max - sps_min) / nsps))
-      bounds.bounds.append(np.arange(0., 1., 1 / nphase))
+      tmp = np.arange(sps_min, sps_max, (sps_max - sps_min) / nsps)
+      assert nsps * nphase < 1e6, f'{nsps} {nphase} {sps_guess} {len(data)} {sps_min} {sps_max}'
+      bounds.bounds.append(np.linspace(sps_min, sps_max, nsps))
+      bounds.bounds.append(np.linspace(0., 1., nphase))
 
       data_tmp = data.astype(np.float32)
       solver = swig.opa_or_swig.DspBinaryMatcher(data_tmp)
@@ -558,6 +560,16 @@ class DataOp:
 
       res = optimize.brute(cost_func, (sps_range, phase_range), finish=None)
       return res
+
+  @staticmethod
+  def PulseToClock(data):
+    val = -0.5
+    res = np.ones_like(data) * val
+    transitions = DataOp.BinaryTransitionPos(data, double_edge=0)
+    for i in range(1, len(transitions)):
+      val *= -1
+      res[transitions[i-1]:transitions[i]] = val
+    return res
 
   @staticmethod
   def ClockPos(period, phase, start_pos, end_pos):
@@ -601,13 +613,18 @@ class DataOp:
     return msg_list
 
   @staticmethod
+  def CleanBinaryDataSimple(data):
+    cleaned_data = DataOp.CenterUnit(DataOp.Hysteresis(data))
+    return cleaned_data
+
+  @staticmethod
   def CleanBinaryData(data):
     cleaned_data = DataOp.CenterUnit(DataOp.Hysteresis(DataOp.RemapBinary(data, -0.5, 0.5)))
     return cleaned_data
 
   @staticmethod
-  def BinaryClockFirstGuess(data):
-    pos = DataOp.BinaryTransitionPos(data)
+  def BinaryClockFirstGuess(data, double_edge=1):
+    pos = DataOp.BinaryTransitionPos(data, double_edge=double_edge)
     dx = DataOp.InvCumSum(pos)
     return stats.mstats.mquantiles(dx, 0.3)[0]
     print(dx)
@@ -622,13 +639,14 @@ class DataOp:
       # requires cleaned data
       clock_guess = DataOp.BinaryClockFirstGuess(data)
     glog.info('clock guess %s', clock_guess)
-    sps, phase = DataOp.ClockRecovery(data, clock_guess, final_drift=0.01, nphase=50)
+    sps, phase = DataOp.ClockRecovery(data, clock_guess, sps_dev=0.01, final_drift=0.01, nphase=50)
     return sps, phase
 
   @staticmethod
-  def RetrieveBinaryData(data, clock_guess=None):
+  def RetrieveBinaryData(data, clock_guess=None, clean=1):
     # TODO: not only binary
-    cleaned_data = DataOp.CleanBinaryData(data)
+    if clean: cleaned_data = DataOp.CleanBinaryData(data)
+    else: cleaned_data = data
     sps, phase = DataOp.GetBinaryClock(cleaned_data, clock_guess)
     sample_phase = (phase + 0.5) % 1
     pos_list = DataOp.ClockPos(sps, sample_phase, 0, len(cleaned_data))
@@ -653,6 +671,7 @@ class DataOp:
     fall_data = np.array(fall_data)
     return fall_data
 
+  @staticmethod
   def FreqSpectrum(data, window_size, agg='max'):
     res = DataOp.FreqWaterfall(data, window_size)
     if agg == 'max':
@@ -660,3 +679,47 @@ class DataOp:
     elif agg == 'mean':
       res = np.mean(res, axis=0)
     return res
+
+  @staticmethod
+  def SolveMatchedFilter_Acquisition(data, filter):
+    nfilter = len(filter)
+    pre_data = data[:nfilter*11]
+    correlation = np.abs(signal.correlate(pre_data, filter, mode='valid'))
+    correl_level = np.max(correlation)
+
+    cleaned = DataOp.CleanBinaryDataSimple(correlation)
+    clock = DataOp.PulseToClock(cleaned)
+    transitions = DataOp.BinaryTransitionPos(clock)
+    diffs = np.diff(transitions)
+    period = np.mean(diffs)
+    return transitions[0] / period, period, np.var(diffs)
+
+
+  @staticmethod
+  def SolveMatchedFilter(data, filter, min_jitter=1):
+    phase, period, var = DataOp.SolveMatchedFilter_Acquisition(data, filter)
+    jitter = math.ceil(max(var*2, min_jitter))
+    vals = []
+    sample_times = []
+
+    last_pos = None
+    nfilter = len(filter)
+    pos = int(phase * period)
+    print(nfilter, pos, period)
+    while pos+nfilter < len(data):
+      rd =data[pos-jitter:pos+jitter+nfilter]
+
+      correlation = signal.correlate(rd, filter, mode='valid')
+      best_pos = np.argmax(np.abs(correlation))
+      vals.append(correlation[best_pos])
+      best_pos += + pos - jitter
+      sample_times.append(best_pos)
+
+      if last_pos is not None:
+        period = 0.9*period + 0.1 * (best_pos - last_pos)
+
+      last_pos = best_pos
+      pos = best_pos + int(period)
+    return np.array(vals), np.array(sample_times)
+
+

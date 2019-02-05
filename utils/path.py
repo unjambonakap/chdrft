@@ -62,6 +62,11 @@ class FileFormatHelper(ExitStack):
       mode = path[:pos]
       path = path[pos+1:]
     path = cwdpath(path)
+
+    if mode == '':
+      ext = os.path.splitext(path)[1]
+      ext2mode = {'.yaml':'yaml', '.json': 'json'}
+      mode = ext2mode.get(ext, '')
     return mode, path
 
   @staticmethod
@@ -79,7 +84,7 @@ class FileFormatHelper(ExitStack):
 
   @property
   def binary_mode(self):
-    return not self.mode in ('json', 'attr_yaml', 'yaml', 'csv')
+    return not self.mode in ('json', 'attr_yaml', 'yaml', 'csv', 'conf')
 
   def binary_mode_str(self):
     return 'b' if self.binary_mode else ''
@@ -106,6 +111,7 @@ class FileFormatHelper(ExitStack):
     x = Format(res)
     if self.mode=='json': x = x.from_json()
     elif self.mode=='yaml': x = x.from_yaml()
+    elif self.mode=='conf': x = x.from_conf()
     elif self.mode=='attr_yaml': x = x.from_yaml().to_attr()
     return x.v
 

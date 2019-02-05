@@ -6,9 +6,9 @@ _tabversion = '3.10'
 
 _lr_method = 'LALR'
 
-_lr_signature = 'entrylistBOOL CODE COMMA DOT EQUALS FLOAT INTEGER LPAR LSQPAR NAME RPAR RSQPAR STRING STRINGQdict_name : dict_name DOT NAME\n                | NAMEentrylist : entry\n                | entrylist COMMA entry\n                |\n                entry : dict_name EQUALS valuevalue : BOOL\n            | INTEGER\n            | FLOAT\n            | STRING\n            | STRINGQ\n            | CODE\n            | list\n            | variable\n            | tuplelist : LSQPAR vararglist RSQPAR\n            | LSQPAR RSQPARvariable : NAMEtuple : LPAR vararglist RPAR\n            | LPAR RPARvararglist : vararglist COMMA value\n                  | value'
+_lr_signature = 'entrylistBOOL CODE COMMA DOT EQUALS FLOAT INTEGER LBRA LPAR LSQPAR NAME RBRA RPAR RSQPAR STRING STRING2 STRINGQdict_name : dict_name DOT NAME\n                | NAMEdict : LBRA entrylist RBRAentrylist : entry\n                | entrylist COMMA entry\n                |\n                entry : dict_name EQUALS valuevalue : BOOL\n            | INTEGER\n            | FLOAT\n            | STRING\n            | STRING2\n            | STRINGQ\n            | CODE\n            | list\n            | variable\n            | tuple\n            | dictlist : LSQPAR vararglist RSQPAR\n            | LSQPAR RSQPARvariable : NAMEtuple : LPAR vararglist RPAR\n            | LPAR RPARvararglist : vararglist COMMA value\n                  | value'
     
-_lr_action_items = {'COMMA':([0,1,2,8,9,10,11,12,13,14,15,16,17,18,20,23,24,25,26,27,28,30,31,],[-5,5,-3,-4,-6,-7,-8,-9,-10,-11,-12,-13,-14,-15,-18,29,-17,-22,29,-20,-16,-19,-21,]),'$end':([0,1,2,8,9,10,11,12,13,14,15,16,17,18,20,24,27,28,30,],[-5,0,-3,-4,-6,-7,-8,-9,-10,-11,-12,-13,-14,-15,-18,-17,-20,-16,-19,]),'NAME':([0,5,6,7,19,21,29,],[4,4,20,22,20,20,20,]),'EQUALS':([3,4,22,],[6,-2,-1,]),'DOT':([3,4,22,],[7,-2,-1,]),'BOOL':([6,19,21,29,],[10,10,10,10,]),'INTEGER':([6,19,21,29,],[11,11,11,11,]),'FLOAT':([6,19,21,29,],[12,12,12,12,]),'STRING':([6,19,21,29,],[13,13,13,13,]),'STRINGQ':([6,19,21,29,],[14,14,14,14,]),'CODE':([6,19,21,29,],[15,15,15,15,]),'LSQPAR':([6,19,21,29,],[19,19,19,19,]),'LPAR':([6,19,21,29,],[21,21,21,21,]),'RSQPAR':([10,11,12,13,14,15,16,17,18,19,20,23,24,25,27,28,30,31,],[-7,-8,-9,-10,-11,-12,-13,-14,-15,24,-18,28,-17,-22,-20,-16,-19,-21,]),'RPAR':([10,11,12,13,14,15,16,17,18,20,21,24,25,26,27,28,30,31,],[-7,-8,-9,-10,-11,-12,-13,-14,-15,-18,27,-17,-22,30,-20,-16,-19,-21,]),}
+_lr_action_items = {'COMMA':([0,1,2,8,9,10,11,12,13,14,15,16,17,18,19,20,22,24,26,27,28,29,30,31,32,34,35,36,],[-6,5,-4,-5,-7,-8,-9,-10,-11,-12,-13,-14,-15,-16,-17,-18,-21,-6,33,-20,-25,33,-23,5,-19,-22,-3,-24,]),'$end':([0,1,2,8,9,10,11,12,13,14,15,16,17,18,19,20,22,27,30,32,34,35,],[-6,0,-4,-5,-7,-8,-9,-10,-11,-12,-13,-14,-15,-16,-17,-18,-21,-20,-23,-19,-22,-3,]),'NAME':([0,5,6,7,21,23,24,33,],[4,4,22,25,22,22,4,22,]),'RBRA':([2,8,9,10,11,12,13,14,15,16,17,18,19,20,22,24,27,30,31,32,34,35,],[-4,-5,-7,-8,-9,-10,-11,-12,-13,-14,-15,-16,-17,-18,-21,-6,-20,-23,35,-19,-22,-3,]),'EQUALS':([3,4,25,],[6,-2,-1,]),'DOT':([3,4,25,],[7,-2,-1,]),'BOOL':([6,21,23,33,],[10,10,10,10,]),'INTEGER':([6,21,23,33,],[11,11,11,11,]),'FLOAT':([6,21,23,33,],[12,12,12,12,]),'STRING':([6,21,23,33,],[13,13,13,13,]),'STRING2':([6,21,23,33,],[14,14,14,14,]),'STRINGQ':([6,21,23,33,],[15,15,15,15,]),'CODE':([6,21,23,33,],[16,16,16,16,]),'LSQPAR':([6,21,23,33,],[21,21,21,21,]),'LPAR':([6,21,23,33,],[23,23,23,23,]),'LBRA':([6,21,23,33,],[24,24,24,24,]),'RSQPAR':([10,11,12,13,14,15,16,17,18,19,20,21,22,26,27,28,30,32,34,35,36,],[-8,-9,-10,-11,-12,-13,-14,-15,-16,-17,-18,27,-21,32,-20,-25,-23,-19,-22,-3,-24,]),'RPAR':([10,11,12,13,14,15,16,17,18,19,20,22,23,27,28,29,30,32,34,35,36,],[-8,-9,-10,-11,-12,-13,-14,-15,-16,-17,-18,-21,30,-20,-25,34,-23,-19,-22,-3,-24,]),}
 
 _lr_action = {}
 for _k, _v in _lr_action_items.items():
@@ -17,7 +17,7 @@ for _k, _v in _lr_action_items.items():
       _lr_action[_x][_k] = _y
 del _lr_action_items
 
-_lr_goto_items = {'entrylist':([0,],[1,]),'entry':([0,5,],[2,8,]),'dict_name':([0,5,],[3,3,]),'value':([6,19,21,29,],[9,25,25,31,]),'list':([6,19,21,29,],[16,16,16,16,]),'variable':([6,19,21,29,],[17,17,17,17,]),'tuple':([6,19,21,29,],[18,18,18,18,]),'vararglist':([19,21,],[23,26,]),}
+_lr_goto_items = {'entrylist':([0,24,],[1,31,]),'entry':([0,5,24,],[2,8,2,]),'dict_name':([0,5,24,],[3,3,3,]),'value':([6,21,23,33,],[9,28,28,36,]),'list':([6,21,23,33,],[17,17,17,17,]),'variable':([6,21,23,33,],[18,18,18,18,]),'tuple':([6,21,23,33,],[19,19,19,19,]),'dict':([6,21,23,33,],[20,20,20,20,]),'vararglist':([21,23,],[26,29,]),}
 
 _lr_goto = {}
 for _k, _v in _lr_goto_items.items():
@@ -27,26 +27,29 @@ for _k, _v in _lr_goto_items.items():
 del _lr_goto_items
 _lr_productions = [
   ("S' -> entrylist","S'",1,None,None,None),
-  ('dict_name -> dict_name DOT NAME','dict_name',3,'p_dict_name','arg_gram.py',117),
-  ('dict_name -> NAME','dict_name',1,'p_dict_name','arg_gram.py',118),
-  ('entrylist -> entry','entrylist',1,'p_entrylist','arg_gram.py',123),
-  ('entrylist -> entrylist COMMA entry','entrylist',3,'p_entrylist','arg_gram.py',124),
-  ('entrylist -> <empty>','entrylist',0,'p_entrylist','arg_gram.py',125),
-  ('entry -> dict_name EQUALS value','entry',3,'p_entry','arg_gram.py',132),
-  ('value -> BOOL','value',1,'p_value','arg_gram.py',136),
-  ('value -> INTEGER','value',1,'p_value','arg_gram.py',137),
-  ('value -> FLOAT','value',1,'p_value','arg_gram.py',138),
-  ('value -> STRING','value',1,'p_value','arg_gram.py',139),
-  ('value -> STRINGQ','value',1,'p_value','arg_gram.py',140),
-  ('value -> CODE','value',1,'p_value','arg_gram.py',141),
-  ('value -> list','value',1,'p_value','arg_gram.py',142),
-  ('value -> variable','value',1,'p_value','arg_gram.py',143),
-  ('value -> tuple','value',1,'p_value','arg_gram.py',144),
-  ('list -> LSQPAR vararglist RSQPAR','list',3,'p_list','arg_gram.py',149),
-  ('list -> LSQPAR RSQPAR','list',2,'p_list','arg_gram.py',150),
-  ('variable -> NAME','variable',1,'p_variable','arg_gram.py',155),
-  ('tuple -> LPAR vararglist RPAR','tuple',3,'p_tuple','arg_gram.py',160),
-  ('tuple -> LPAR RPAR','tuple',2,'p_tuple','arg_gram.py',161),
-  ('vararglist -> vararglist COMMA value','vararglist',3,'p_vararglist','arg_gram.py',166),
-  ('vararglist -> value','vararglist',1,'p_vararglist','arg_gram.py',167),
+  ('dict_name -> dict_name DOT NAME','dict_name',3,'p_dict_name','arg_gram.py',124),
+  ('dict_name -> NAME','dict_name',1,'p_dict_name','arg_gram.py',125),
+  ('dict -> LBRA entrylist RBRA','dict',3,'p_dict','arg_gram.py',130),
+  ('entrylist -> entry','entrylist',1,'p_entrylist','arg_gram.py',134),
+  ('entrylist -> entrylist COMMA entry','entrylist',3,'p_entrylist','arg_gram.py',135),
+  ('entrylist -> <empty>','entrylist',0,'p_entrylist','arg_gram.py',136),
+  ('entry -> dict_name EQUALS value','entry',3,'p_entry','arg_gram.py',148),
+  ('value -> BOOL','value',1,'p_value','arg_gram.py',152),
+  ('value -> INTEGER','value',1,'p_value','arg_gram.py',153),
+  ('value -> FLOAT','value',1,'p_value','arg_gram.py',154),
+  ('value -> STRING','value',1,'p_value','arg_gram.py',155),
+  ('value -> STRING2','value',1,'p_value','arg_gram.py',156),
+  ('value -> STRINGQ','value',1,'p_value','arg_gram.py',157),
+  ('value -> CODE','value',1,'p_value','arg_gram.py',158),
+  ('value -> list','value',1,'p_value','arg_gram.py',159),
+  ('value -> variable','value',1,'p_value','arg_gram.py',160),
+  ('value -> tuple','value',1,'p_value','arg_gram.py',161),
+  ('value -> dict','value',1,'p_value','arg_gram.py',162),
+  ('list -> LSQPAR vararglist RSQPAR','list',3,'p_list','arg_gram.py',167),
+  ('list -> LSQPAR RSQPAR','list',2,'p_list','arg_gram.py',168),
+  ('variable -> NAME','variable',1,'p_variable','arg_gram.py',173),
+  ('tuple -> LPAR vararglist RPAR','tuple',3,'p_tuple','arg_gram.py',178),
+  ('tuple -> LPAR RPAR','tuple',2,'p_tuple','arg_gram.py',179),
+  ('vararglist -> vararglist COMMA value','vararglist',3,'p_vararglist','arg_gram.py',184),
+  ('vararglist -> value','vararglist',1,'p_vararglist','arg_gram.py',185),
 ]

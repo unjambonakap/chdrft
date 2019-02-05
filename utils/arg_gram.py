@@ -44,8 +44,7 @@ class ConfParser:
     if data is None: return None
     return self.parser.parse(data, lexer=self.lexer)
 
-  tokens = ('NAME', 'FLOAT', 'INTEGER', 'BOOL', 'STRING', 'STRINGQ', 'LPAR', 'RPAR', 'LSQPAR', 'RSQPAR',
-            'EQUALS', 'DOT', 'COMMA', 'CODE')
+  tokens = ('NAME', 'FLOAT', 'INTEGER', 'BOOL', 'STRING', 'STRING2', 'STRINGQ', 'LPAR', 'RPAR', 'LSQPAR', 'RSQPAR', 'LBRA', 'RBRA', 'EQUALS', 'DOT', 'COMMA', 'CODE')
   #'PLUS', 'MINUS', 'TIMES', 'DIVIDE',)
 
   # Tokens
@@ -57,6 +56,9 @@ class ConfParser:
   t_EQUALS = r'='
   t_LPAR = r'\('
   t_RPAR = r'\)'
+
+  t_LBRA = r'\{'
+  t_RBRA = r'\}'
   t_LSQPAR = r'\['
   t_RSQPAR = r'\]'
   t_DOT = r'\.'
@@ -90,6 +92,11 @@ class ConfParser:
     t.value = t.value[1:-1]
     return t
 
+  def t_STRING2(self, t):
+    r'"([^\\"]+|\\"|\\\\)*"'  # I think this is right ...
+    t.value = t.value[1:-1]
+    return t
+
   def t_STRINGQ(self, t):
     r'\#\w+'  # I think this is right ...
     t.value = t.value[1:]
@@ -101,7 +108,7 @@ class ConfParser:
     return t
 
   # Ignored characters
-  t_ignore = " \t"
+  t_ignore = " \t\n"
 
   def t_error(self, t):
     print("Illegal character '%s'" % t.value[0])
@@ -119,14 +126,23 @@ class ConfParser:
     if len(p) == 4: p[0] = p[1] + [p[3]]
     else: p[0] = [p[1]]
 
+  def p_dict(self, p):
+    '''dict : LBRA entrylist RBRA'''
+    p[0] = p[2]
+
   def p_entrylist(self, p):
     '''entrylist : entry
                 | entrylist COMMA entry
                 |
                 '''
-    if len(p) == 1: p[0] = None
-    elif len(p) == 2: p[0] = [p[1]]
-    else: p[0] = p[1] + [p[3]]
+    if len(p) == 1: p[0] = LazyConf()
+    elif len(p) == 2:
+      p[0] = LazyConf()
+      p[0]._add_rec(*p[1])
+    else:
+      assert isinstance(p[1], LazyConf)
+      p[0] = p[1]
+      p[0]._add_rec(*p[3])
 
   def p_entry(self, p):
     '''entry : dict_name EQUALS value'''
@@ -137,11 +153,13 @@ class ConfParser:
             | INTEGER
             | FLOAT
             | STRING
+            | STRING2
             | STRINGQ
             | CODE
             | list
             | variable
-            | tuple'''
+            | tuple
+            | dict'''
     p[0] = p[1]
 
 
@@ -239,8 +257,9 @@ class LazyConf(Attributize):
     if vars_ctx is not None:
       ctx_locals, ctx_globals = get_n2_locals_and_globals(vars_ctx+1)
     entries = g_parser.parse(data, ctx_locals, ctx_globals)
-    for keys, v in entries:
-      self._add_rec(keys, v)
+    self._merge(entries)
+    #for keys, v in entries:
+    #  self._add_rec(keys, v)
 
 
 def test_parser(ctx):

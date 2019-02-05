@@ -7,6 +7,7 @@ from collections import defaultdict
 from chdrft.utils.misc import to_list, Attributize, proc_path
 from sortedcontainers import SortedSet
 import math
+import io
 
 
 class Range1D:
@@ -50,9 +51,6 @@ class Range1D:
     if self.high is not None: v = min(v, self.high)
     return v
 
-  def __str__(self):
-    return 'Range1D(%s, %s)' % (self.low, self.high)
-
   def contains(self, other):
     if isinstance(other, Range1D):
       return self.low <= other.low and other.high <= self.high
@@ -83,11 +81,11 @@ class Range1D:
   def __len__(self):
     return self.length()
 
-  def intersect(self, other):
-    return not self.intersection(other).empty
+  def intersect(self, other, adj=0):
+    return not self.intersection(other, adj=adj).empty
 
-  def intersection(self, other):
-    return Range1D(max(self.low, other.low), min(self.high, other.high))
+  def intersection(self, other, adj=0):
+    return Range1D(max(self.low, other.low), min(self.high, other.high) + adj)
 
   def union(self, other):
     return Range1D(min(self.low, other.low), max(self.high, other.high))
@@ -110,10 +108,31 @@ class Range1D:
     return self.as_tuple.__hash__()
 
   def __str__(self):
-    return str(self.as_tuple)
+    if isinstance(self.low, int):
+      return 'Range1D(%x, %x)' % (self.low, self.high)
+    return f'Range1D({self.low}, {self.high})'
 
   def __repr__(self):
-    return repr(self.as_tuple)
+    if isinstance(self.low, int): return repr(f'{self.low:x}, {self.high:x}')
+    return repr(f'{self.low}, {self.high}')
+
+
+class Range1DWithData(Range1D):
+
+  def __init__(self, *args, data=None, **kwargs):
+    super().__init__(*args, **kwargs)
+    self.data = data
+
+  def union(self, other):
+    if other.high + 1 == self.low: return other.union(self)
+    assert self.high + 1 == other.low
+    return Range1DWithData(self.low, other.high, data=self.data + other.data)
+
+  def get_data(self, qrange):
+    assert self.contains(qrange)
+    i1 = qrange.low - self.low
+    i2 = qrange.high - self.low
+    return self.data[i1:i2 + 1]
 
 
 class Range2D:
@@ -148,8 +167,9 @@ class Range2D:
 
 class Intervals:
 
-  def __init__(self, xl=[], regions=None):
+  def __init__(self, xl=[], regions=None, use_range_data=False):
     self.xl = SortedSet()
+    self.use_range_data = use_range_data
     if regions is not None:
       xl = [r.getRegion() for r in regions]
     else:
@@ -161,7 +181,13 @@ class Intervals:
       self.add(x)
     glog.debug('Intervals >> %s', self.xl)
 
-  def add(self, elem):
+  def add(self, *args, **kwargs):
+
+    if self.use_range_data:
+      elem = Range1DWithData(*args, **kwargs)
+    else:
+      elem = Range1D(*args, **kwargs)
+
     if elem.empty: return
     pos = self.xl.bisect_left(elem)
     cur = None
@@ -169,23 +195,28 @@ class Intervals:
     if pos > 0:
       prev = self.xl[pos - 1]
       if prev.contains(elem.low - 1):
-        prev.low = elem.low
-        prev.high = max(elem.high, prev.high)
-        cur = prev
+        self.xl.pop(pos - 1)
+
+        ne = prev.union(elem)
+        self.xl.add(ne)
+        cur = ne
         next_pos = pos
+
     if cur is None:
       cur = elem
-      if pos < len(self.xl):
-        self.xl[pos] = elem
-      else:
-        self.xl.add(elem)
+      self.xl.add(elem)
 
+    next = None
+    assert cur == self.xl.pop(next_pos - 1)
+    next_pos -= 1
     while next_pos < len(self.xl):
-      now = self.xl[next_pos].intersect(cur)
-      if now.high + 1 < now.low:
+      next = self.xl[next_pos]
+      if cur.high + 1 < next.low:
         break
-      cur.high = max(cur.high, now.high)
-      del self.xl[next_pos]
+      self.xl.pop(next_pos)
+      cur = cur.union(next)
+      cur.high = max(cur.high, next.high)
+    self.xl.add(cur)
 
     return self
 
@@ -263,6 +294,56 @@ class Intervals:
       res.add(Range1D(x.low + p, x.high + p))
     return res
 
+  def query(self, q):
+    pos = self.xl.bisect_left(Range1D(q, math.inf))
+    if pos == 0: return None
+    if q <= self.xl[pos - 1].high: return self.xl[pos - 1]
+    return None
+
+  def query_data(self, qr):
+    found_range = self.query(qr.low)
+    if found_range is None: return bytes([0] * (qr.length() + 1))
+    return found_range.get_data(qr)
+
+  def get_ordered_ranges(self):
+    return list(self.xl)
+
+  def intersection(self, other):
+
+    prim_ranges = get_primitive_ranges(self.get_ordered_ranges(), other.get_ordered_ranges())
+    res = Intervals()
+    for e in prim_ranges:
+      if self.query(e.low) and other.query(e.low):
+        res.add(e)
+    return res
+
+  def __str__(self):
+    s = io.StringIO()
+    s.write('Interval:\n')
+    for e in self.xl:
+      s.write(str(e) + '\n')
+    res = s.getvalue()
+    s.close()
+    return res
+
+
+def get_primitive_ranges(la, lb):
+  res = []
+  ia, ib = 0, 0
+  pos = -math.inf
+  while ia < len(la) and ib < len(lb):
+    ra = la[ia]
+    rb = lb[ib]
+    pos = max(pos, ra.low, rb.low)
+    npos = min(ra.high, rb.high)
+    if pos <= npos: res.append(Range1D(pos, npos))
+
+    if ra.high == npos: ia += 1
+    if rb.high == npos: ib += 1
+
+    pos = npos + 1
+  return res
+
 
 class SparseList:
 
@@ -330,11 +411,14 @@ def mat_scale(v):
 
 
 def mat_rot(rot_z):
-  return np.array((
-    (math.cos(rot_z), -math.sin(rot_z), 0),
-    (math.sin(rot_z), math.cos(rot_z), 0),
-    (0, 0, 1),
-  ))
+  return np.array(
+      (
+          (math.cos(rot_z), -math.sin(rot_z), 0),
+          (math.sin(rot_z), math.cos(rot_z), 0),
+          (0, 0, 1),
+      )
+  )
+
 
 class Box:
 
@@ -468,8 +552,10 @@ class Box:
     return f'Box(low={self.low}, high={self.high}, center={self.center}, dim={self.dim})'
 
   def get_window(self):
-    return (slice(self.low[1], self.low[1] + self.dim[1]),
-            slice(self.low[0], self.low[0] + self.dim[0]))
+    return (
+        slice(self.low[1], self.low[1] + self.dim[1]),
+        slice(self.low[0], self.low[0] + self.dim[0])
+    )
 
   def contains(self, pt):
     return np.all((self.low <= pt) & (pt <= self.high))
@@ -483,7 +569,6 @@ class Box:
   def overlaps(self, other):
     low2 = np.maximum(self.low, other.low)
     high2 = np.minimum(self.high, other.high)
-    print(low2, high2)
     return np.all(low2 <= high2)
 
   def flip_y(self, my):
@@ -505,5 +590,7 @@ class Box:
 
   def interpolate(self, other, alpha):
     # (1-alpha) * this + alpha  * other
-    return Box(center=(1-alpha) * self.center + alpha * other.center,
-               dim=(1-alpha) * self.dim + alpha * other.dim)
+    return Box(
+        center=(1 - alpha) * self.center + alpha * other.center,
+        dim=(1 - alpha) * self.dim + alpha * other.dim
+    )

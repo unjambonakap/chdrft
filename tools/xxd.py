@@ -5,7 +5,18 @@ import sys
 import curses.ascii
 import argparse
 import io
-from chdrft.utils.misc import Attributize
+from chdrft.utils.misc import Attributize, struct_helper
+from chdrft.utils.fmt import Format
+
+kDefaults = Attributize(
+    reverse=0,
+    num_cols=4,
+    head=-1,
+    skip_head=0,
+    word_size=4,
+    endian='little',
+    offset=0,
+)
 
 
 class xxd:
@@ -13,18 +24,21 @@ class xxd:
   @staticmethod
   def args(parser):
     parser.add_argument('--reverse', action='store_true')
-    parser.add_argument('--num_cols', type=int, default=4)
-    parser.add_argument('--head', type=int, default=-1)
-    parser.add_argument('--skip_head', type=int, default=0)
-    parser.add_argument('--word_size', type=int, default=4)
-    parser.add_argument('--endian', type=str, choices=['little', 'big'], default='little')
-    parser.add_argument('--offset', type=int, default=0)
+    parser.add_argument('--num_cols', type=int, default=kDefaults.num_cols)
+    parser.add_argument('--head', type=int, default=kDefaults.head)
+    parser.add_argument('--skip_head', type=int, default=kDefaults.skip_head)
+    parser.add_argument('--word_size', type=int, default=kDefaults.word_size)
+    parser.add_argument('--endian', type=str, choices=['little', 'big'], default=kDefaults.endian)
+    parser.add_argument('--offset', type=int, default=kDefaults.offset)
 
   @staticmethod
-  def FromBuf(buf, args):
+  def FromBuf(buf, args={}):
     input = io.BytesIO(buf)
     output = io.StringIO()
-    x = xxd(args, input, output)
+    args = dict(args)
+    for k, v in kDefaults.items():
+      if k not in args: args[k] = v
+    x = xxd(Attributize(args), input, output)
     x.xxd()
     return output.getvalue()
 
@@ -38,12 +52,10 @@ class xxd:
 
   def format_xxd_line(self, data, off):
     res = '{:08x}: '.format(off)
+    data = Format(data).modpad(self.word_size, 0).v
 
-    for i in range((len(data) + self.word_size - 1) // self.word_size):
-      cur = data[i * self.word_size:(i + 1) * self.word_size]
-      cur += b'\x00' * (self.word_size - len(cur))
-      val = struct.unpack(self.fx, cur)[0]
-      res += ('{:0%dx} ' % (self.word_size * 2)).format(val)
+    for v in struct_helper.get(data, size=self.word_size, nelem=-1, little_endian=self.le):
+      res += ('{:0%dx} ' % (self.word_size * 2)).format(v)
 
     res += ' '
     for i in data:
@@ -60,21 +72,7 @@ class xxd:
     self.endian = self.args.endian
 
     bytes_per_line = self.num_cols * self.word_size
-    self.fx = ''
-
-    if self.endian == 'little':
-      self.fx += '<'
-    elif self.endian == 'big':
-      self.fx += '>'
-    else:
-      assert False, 'Bad endianness'
-
-    if self.word_size == 4:
-      self.fx += 'I'
-    elif self.word_size == 8:
-      self.fx += 'Q'
-    else:
-      assert False, 'bad word size: %d' % self.word_size
+    self.le = self.endian == 'little'
 
     off = self.args.offset
     eof = False
@@ -94,14 +92,15 @@ class xxd:
           break
         data += tmp
         rem -= len(tmp)
-
+      if len(data) == 0: break
 
       if skip_headc == 0:
         res = self.format_xxd_line(data, off)
         res += '\n'
         off += len(data)
         self.output.write(res)
-      else: skip_headc -= 1
+      else:
+        skip_headc -= 1
 
       if headc == 0: break
       headc -= 1
@@ -110,12 +109,12 @@ class xxd:
     assert 0
 
 
-
 if __name__ == '__main__':
   parser = argparse.ArgumentParser()
 
-  self.args = self.parser.parse_args()
-  x = xxd(parser, sys.stdin.buffer, sys.stdout)
+  xxd.args(parser)
+  args = parser.parse_args()
+  x = xxd(args, sys.stdin.buffer, sys.stdout)
 
   if args.reverse:
     x.xxdr()

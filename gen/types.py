@@ -128,6 +128,8 @@ class TypesHelper:
 
 types_helper = None
 types_helper_by_m32 = {True: TypesHelper(m32=True), False: TypesHelper(m32=False), None: None}
+g_types_helper = types_helper_by_m32[True]
+g_types_helper32 = types_helper_by_m32[False]
 
 def set_cur_types_helper(m32):
   global types_helper

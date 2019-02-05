@@ -11,7 +11,6 @@ import glog
 
 if not is_python2:
   from contextlib import ExitStack
-  from chdrft.utils.path import FileFormatHelper
 
 global flags
 flags = None
@@ -149,37 +148,37 @@ class ActionHandler:
     self.init = init
     self.global_action = global_action
 
-
   def do_proc(self, stack, flags, *args, **kwargs):
-      self.stack = stack
-      output_file = None
-      mode = None
+    self.stack = stack
+    output_file = None
+    from chdrft.utils.path import FileFormatHelper
+    mode = None
 
-      if len(self.args) == 1 and isinstance(self.args[0], Attributize):
-        self.args[0].update(vars(self.flags))
-      if self.init: self.init(*self.args)
+    if len(self.args) == 1 and isinstance(self.args[0], Attributize):
+      self.args[0].update(vars(self.flags))
+    if self.init: self.init(*self.args)
 
-      if flags.action_output_file:
-        if stack is not None:
-          output_file = FileFormatHelper(filename=flags.action_output_file, write=True)
-          stack.enter_context(output_file)
-      try:
-        assert len(self.main_actions)>0
-        for action in self.main_actions:
-          res = self.execute_action(action)
-          if output_file:
-            output_file.write(res)
-          if not flags.noaction_log_output:
-            glog.info('Action %s results: %s', action, res)
-          if flags.ret_syscode:
-            if isinstance(res, bool): res = 1 if not res else 0
-            sys.exit(res)
-      except KeyboardInterrupt as e:
-        if flags.noctrlc_trace: pass
-        else: raise e
+    if flags.action_output_file:
+      if stack is not None:
+        output_file = FileFormatHelper(filename=flags.action_output_file, write=True)
+        stack.enter_context(output_file)
+    try:
+      assert len(self.main_actions) > 0
+      for action in self.main_actions:
+        res = self.execute_action(action)
+        if output_file:
+          output_file.write(res)
+        if not flags.noaction_log_output:
+          glog.info('Action %s results: %s', action, res)
+        if flags.ret_syscode:
+          if isinstance(res, bool): res = 1 if not res else 0
+          sys.exit(res)
+    except KeyboardInterrupt as e:
+      if flags.noctrlc_trace: pass
+      else: raise e
 
   def proc(self, flags, caller_ctx, *args, **kwargs):
-    self.caller_ctx  =caller_ctx
+    self.caller_ctx = caller_ctx
     self.args = args
     self.kwargs = kwargs
     self.flags = flags
@@ -197,7 +196,7 @@ class ActionHandler:
 
   def reqs(self, flags):
     self.flags = flags
-    res=Attributize(default=False)
+    res = Attributize(default=False)
     for x in self.all_actions:
       for v in x.reqs:
         res[v] = True
@@ -223,7 +222,9 @@ class ActionHandler:
 
   def get_action(self, action_name):
     if self.global_action: return self.caller_ctx[action_name]
-    assert action_name in self.cmds, 'Action not known %s, lst=(%s)' % (action_name, self.cmds.keys())
+    assert action_name in self.cmds, 'Action not known %s, lst=(%s)' % (
+        action_name, self.cmds.keys()
+    )
     return self.cmds[action_name]
 
   def execute_action(self, action):
