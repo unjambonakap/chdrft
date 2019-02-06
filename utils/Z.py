@@ -58,3 +58,4 @@ from chdrft.utils.swig import swig
 from chdrft.display.utils import DataOp, DataFile, DataSet, DynamicDataset
 import matplotlib.pyplot as plt
 from enum import Enum
+import chdrft.conv.utils as conv_utils
