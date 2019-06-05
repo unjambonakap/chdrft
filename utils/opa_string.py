@@ -8,10 +8,12 @@ from chdrft.utils.misc import Attributize
 import chdrft.utils.misc as cmisc
 import glog
 import math
+import numpy as np
 
 global flags, cache
 flags = None
 cache = None
+
 
 def str_dist(a, b, case=True):
   if len(a) < len(b):
@@ -155,10 +157,10 @@ class FuzzyMatcher:
     if tb[-1][0] < 0.5:
       return None
     if len(tb) >= 2:
-      sc1=tb[-1][0]
-      sc2=tb[-2][0]
+      sc1 = tb[-1][0]
+      sc2 = tb[-2][0]
       bad = (sc2 / sc1 > 0.9)
-      if sc1 < 1- 1e-3:
+      if sc1 < 1 - 1e-3:
         diff = (sc1 - sc2) / (1 - sc1)
         if diff > 1:
           bad = False
@@ -166,7 +168,10 @@ class FuzzyMatcher:
         return None
     return tb[-1]
 
+
 import jsonpickle
+
+
 class FuzzyMatcherHandler(jsonpickle.handlers.BaseHandler):
 
   def flatten(self, obj, data):
@@ -179,11 +184,35 @@ class FuzzyMatcherHandler(jsonpickle.handlers.BaseHandler):
     res.names = jsonpickle.decode(obj['data'])
     return res
 
+
 FuzzyMatcherHandler.handles(FuzzyMatcher)
+
+
+def lcs(a, b):
+  na = len(a)
+  nb = len(b)
+  if na > nb: return lcs(b, a)
+  tb = [0] * (na + 1)
+  for i in range(nb):
+    for j in reversed(range(na)):
+      if a[j] == b[i]:
+        tb[j + 1] = max(tb[j] + 1, tb[j + 1])
+  return max(tb)
+
+
+def min_substr_diff(hay, needle, mod_req=1):
+  best = (len(needle), None)
+  for i in range(0, len(hay) - len(needle) + 1, mod_req):
+    err = 0
+    for j in range(len(needle)):
+      err += needle[j] != hay[i + j]
+    best = min(best, (err, i))
+  return best
+
 
 def args(parser):
   clist = CmdsList().add(test)
-  ActionHandler.Prepare(parser, clist.lst)
+  ActionHandler.Prepare(parser, clist.lst, global_action=1)
   parser.add_argument('a', type=str)
   parser.add_argument('b', type=str)
 
@@ -198,6 +227,11 @@ def test(ctx):
   mc = FuzzyMatcher()
   mc.add_name(a)
   print('FUZZY >> ', mc.find(b))
+
+
+def test_lcs(ctx):
+  print(lcs(ctx.a, ctx.b))
+
 
 def main():
   ctx = Attributize()

@@ -98,7 +98,7 @@ class FileTube(FileLike):
 
   def __init__(self, filename=None, fd=None, fileobj=None):
     if filename:
-      fileobj= open(filename)
+      fileobj= open(filename, 'r+b', buffering=0)
     if fd:
       fileobj = os.fdopen(fd)
     super().__init__(fileobj)

@@ -21,6 +21,7 @@ import glog
 from chdrft.emu.func_call import MachineCaller, mem_simple_buf_gen, AsyncMachineCaller, FunctionCaller, AsyncFunctionCaller
 import re
 from collections.abc import Iterable
+from chdrft.utils.parser import BufferParser
 
 
 def safe_hook(func):
@@ -50,6 +51,7 @@ def load_elf(kern, fil):
   need_load = []
   for seg in elf.elf.iter_segments():
     s = Attributize(seg.header)
+    print('GOT SEG ', hex(s.p_vaddr), hex(s.p_offset), s)
     if s.p_type == 'PT_LOAD' and s.p_memsz > 0:
       need_load.append(s)
   flag_mp = [
@@ -85,6 +87,7 @@ def load_elf(kern, fil):
     kern.mem_map(base_addr, seg_sz, flag_mem)
 
     content = elf.get_seg_content(s)
+    print('WRITTING ', hex(addr), len(content))
     kern.mu.mem_write(addr, content)
 
   kern.post_load()
@@ -92,6 +95,19 @@ def load_elf(kern, fil):
   regs = kern.regs
   for note in elf.notes:
     if note.n_type != 'NT_PRSTATUS':
+      continue
+    print(len(note.status.raw))
+    print(len(note.data))
+    if kern.arch.typ == Arch.arm64:
+      assert len(note.data) == 392
+      buf = BufferParser(note.data[76+32+4:], arch=kern.arch)
+      for i in range(31):
+        regs[f'x{i}'] = buf.read_u64()
+      regs.sp = buf.read_u64()
+      regs.pc = buf.read_u64()
+      regs.cpacr_el1 = buf.read_u64()
+      glog.info(f'Loaded sp={regs.sp:x}, pc={regs.pc:x} cpacr={regs.cpacr_el1:x}')
+
       continue
 
     if 'status' in note:
@@ -255,13 +271,14 @@ class Kernel:
       qemu_state=None,
       bochs_state=None,
       base=0,
+      core=False,
       **kwargs
   ):
 
     arch = norm_arch(arch)
     lib = None
     if elf:
-      lib = ElfUtils(elf)
+      lib = ElfUtils(elf, core=core)
       if arch is None:
         arch = lib.arch
     elif qemu_state:
@@ -315,7 +332,7 @@ class Kernel:
     return kern, lib
 
   def mem_map(self, start, sz, flags):
-    print('MAPPING ', hex(start), hex(sz), flags)
+    print('MAPPING ', hex(start), hex(start+sz), hex(sz), flags)
     self.mu.mem_map(start, sz, flags)
     self.maps.append((start, sz, flags))
 
@@ -425,6 +442,7 @@ class Kernel:
     self.ins_count = 0
     self.hook_intr_func = None
     self.notify_hook_code = None
+    self.mem_content = None
 
     watched = []
     sz = 4
@@ -534,18 +552,16 @@ class Kernel:
     mem = self.byte_reader(address, size)
     self.ignore_mem_access = False
 
-    if mem[0] == 0xcd:
-      self.has_int = True
-      self.hook_intr(mem[1], address+size)
+    #if mem[0] == 0xcd:
+    #  self.has_int = True
+    #  self.hook_intr(mem[1], address+size)
 
     if self.prev_ins == mem and mem == b'\x00\x00':
       self.ignore_mem_access = True
       return
     self.prev_ins = mem
-    self.tracer.notify_ins(address, size)
-    glog.info('\n\n')
-    mem = bytes(mem)
-    glog.info('CODE at %s %s %d', hex(address), binascii.hexlify(mem), self.ins_count)
+    self.handle_ins_log(address, size)
+
     if self.kill_in == 0:
       self.stop()
     self.kill_in -= 1
@@ -554,6 +570,15 @@ class Kernel:
     ins0 = data[0]
     for ins in data:
       glog.info("0x%x:\t%s\t%s %s" % (ins.address, ins.mnemonic, ins.op_str, ins.bytes))
+
+  def handle_ins_log(self, address, size):
+    mem = self.byte_reader(address, size)
+    info = f'{self.ins_count}'
+    if self.mem_content:
+      info += ' '+self.mem_content.get_info(address)
+    self.tracer.notify_ins(address, size, info=info)
+    mem = bytes(mem)
+    glog.info(f'\n\nCODE at %s %s %d {info}', hex(address), binascii.hexlify(mem), self.ins_count)
 
   def hook_unmapped(self, mu, access, address, size, value, _2, *args, **kwargs):
     print('BAD access at rip=', hex(self.regs.ins_pointer), hex(address), access, size, value)

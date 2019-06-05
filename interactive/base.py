@@ -25,6 +25,7 @@ def args(parser):
 def run_notebook(*args, notebook_dir='./', background=False, current_pid=-1):
 
   print('Running notebook for ', current_pid)
+  os.environ['QT_API']='pyqt5'
   proc = sp.Popen(
       [
           'jupyter',
@@ -59,7 +60,12 @@ def create_kernel(runid=None, do_run_notebook=False, **kwargs):
     threading.Thread(target=run_notebook, kwargs=kwargs).start()
 
   ipkernel.initialize(['python', '--matplotlib=qt'])
-  ipkernel.user_module, ipkernel.user_ns = extract_module_locals(1)
+  par_locals, par_globals = cmisc.get_n2_locals_and_globals()
+  par_globals = dict(par_globals)
+  par_globals.update(par_locals)
+
+  ipkernel.user_module, _= extract_module_locals(1)
+  ipkernel.user_ns = par_globals
   ipkernel.shell.set_completer_frame()
 
   time.sleep(1)

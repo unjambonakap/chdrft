@@ -5,6 +5,7 @@ from chdrft.cmds import Cmds
 from contextlib import ExitStack
 from chdrft.utils.fmt import Format
 import glog
+import sys
 
 def ProgDir(*args):
   return os.path.join(proc_path('~/programmation'), *args)
@@ -61,7 +62,7 @@ class FileFormatHelper(ExitStack):
     if pos != -1:
       mode = path[:pos]
       path = path[pos+1:]
-    path = cwdpath(path)
+    if not path.startswith('@'): path = cwdpath(path)
 
     if mode == '':
       ext = os.path.splitext(path)[1]
@@ -91,9 +92,12 @@ class FileFormatHelper(ExitStack):
 
   def __enter__(self):
     super().__enter__()
-    if self.write_: self.file = open(self.filename, 'w'+self.binary_mode_str())
-    else: self.file = open(self.filename, 'r'+self.binary_mode_str())
-    self.enter_context(self.file)
+    if self.filename == '@stdin': self.file = sys.stdin
+    elif self.filename == '@stdout': self.file = sys.stdout
+    else:
+      if self.write_: self.file = open(self.filename, 'w'+self.binary_mode_str())
+      else: self.file = open(self.filename, 'r'+self.binary_mode_str())
+      self.enter_context(self.file)
     return self
 
   def write(self, x):

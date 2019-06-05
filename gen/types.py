@@ -535,7 +535,7 @@ class OpaBaseType(object):
       if self.fields:
         s.append('Fields: (#{})'.format(len(self.ordered_fields)))
         for f in self.ordered_fields:
-          glog.info('got field %s', f)
+          glog.debug('got field %s', f)
           s.append('name={}, off={}, typ:\n{}'.format(f.name, f.off, f.typ.gets(indent + 1, seen)))
 
     s.append('=== DONE name={} ===='.format(self.name))
@@ -584,7 +584,7 @@ class OpaType(OpaBaseType):
     self.desc = OpaType.get_key(self.cursor, self.internal_typ)
     self.name = self.desc
     if self.name is not None:
-      print(self.name)
+      glog.debug(self.name)
       assert isinstance(self.name, str)
 
     if self.internal_typ:
@@ -709,7 +709,7 @@ class OpaType(OpaBaseType):
         raise Exception('fail')
 
     self.size = self.internal_typ.get_size() * 8
-    glog.info('name=%s, base_kind=%s, typ=%s, base_type=%s, kind=%s', self.name, self.get_base_kind(),
+    glog.debug('name=%s, base_kind=%s, typ=%s, base_type=%s, kind=%s', self.name, self.get_base_kind(),
               self.typ, self.base_typ, cur.kind)
     self._is_primitive = self.get_base_kind() in primitive_types
     self.typ_data = types_helper.get_by_clang(self.internal_typ.kind)
@@ -728,7 +728,7 @@ class OpaType(OpaBaseType):
         self.parent.children.append(self)
         break
       else:
-        glog.info('%s >> %s', par.kind, par.location)
+        glog.debug('%s >> %s', par.kind, par.location)
         assert False, "unhandled"
 
   def init_funcproto(self):
@@ -750,7 +750,7 @@ class OpaType(OpaBaseType):
     cursor = self.cursor
     self.name = to_str(cursor.displayname)
     tmp = cursor.canonical.type.get_canonical()
-    glog.info('adding record %s', self.name)
+    glog.debug('adding record %s', self.name)
 
     for u in cursor.get_children():
       #print('adding record children >> ', u.kind, u.type.kind, cursor.location)

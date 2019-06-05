@@ -19,7 +19,7 @@ from .debuggercommon import Status
 from chdrft.utils.misc import SeccompFilters, failsafe, lowercase_norm
 import chdrft.utils.misc as cmisc
 from chdrft.emu.binary import guess_arch
-from chdrft.emu.base import Memory, Regs
+from chdrft.emu.base import Memory, Regs, Stack
 from chdrft.emu.elf import ElfUtils
 from chdrft.emu.trace import WatchedRegs, WatchedMem, Tracer
 from chdrft.emu.func_call import MachineCaller
@@ -49,6 +49,7 @@ class GdbDebugger(ExitStack):
     self.set_arch()
     self.regs = GdbReg(self.arch, self)
     self.mem = Memory(self.get_memory, self.set_memory, arch=self.arch)
+    self.stack = Stack(self.regs, self.mem, self.arch)
     self.reason = ''
     self.set_stop_handler(lambda x: None)
     self.regs_watch = WatchedRegs('all', self.regs, self.arch.regs)
@@ -76,7 +77,11 @@ class GdbDebugger(ExitStack):
         bpt.delete()
 
   def del_bpt(self, bpt):
-    bpt.delete()
+    if isinstance(bpt, int):
+      self.do_execute(f'del {bpt}')
+    else:
+      bpt.delete()
+
 
   def get_pid(self):
     return self.gdb.selected_thread().ptid[0]
@@ -120,13 +125,17 @@ class GdbDebugger(ExitStack):
 
     return BpWithCallback
 
-  def set_bpt(self, ea, cb=None):
+  def set_bpt(self, ea, cb=None, hard=False):
+    if hard: return self.set_hard_bpt_exe(ea)
     return self.bp_generator(cb)("*0x%x" % ea)
 
   def set_hard_bpt(self, ea, cb=None):
     return self.bp_generator(cb)("*0x%x" % ea, self.gdb.BP_WATCHPOINT, self.gdb.WP_ACCESS)
+
   def set_hard_bpt_exe(self, ea, cb=None):
-    self.do_execute('hbreak *0x%x' % ea)
+    res = self.do_execute('hbreak *0x%x' % ea)
+    return int(re.search('Hardware assisted breakpoint (\d+) at', res).group(1))
+
 
   def wait(self):
     pass
@@ -182,6 +191,82 @@ class GdbDebugger(ExitStack):
     assert self.arch.ins_size != -1
     self.tracer.notify_ins(self.get_pc(), self.arch.ins_size)
 
+  def get_ins_data(self, pc=None):
+    if pc is None: pc = self.get_pc()
+    data = self.mem.read(pc, self.arch.ins_size)
+    return data
+
+  def get_ins_str(self, pc=None):
+    if pc is None: pc = self.get_pc()
+    return self.arch.mc.ins_str(self.get_ins_data(pc), addr=pc)
+
+  def get_ins_str_gdb(self, pc=None):
+    if pc is None: pc = self.get_pc()
+    return self.do_execute(f'x/i {pc}').strip()
+
+  def trace_to(self, target_pc, disp_ins=0, regs=[], max_ins=-1, mem=[], funcs={}, want_prev_regs=1):
+    if isinstance(target_pc, int):
+      target_pc = set([target_pc])
+
+    inslist = []
+    prev_regs = []
+    while True:
+      if max_ins == 0: break
+      max_ins -= 1
+      self.step_into()
+      cpc = self.regs.pc
+
+      if disp_ins:
+
+        u = self.get_ins_info(cpc, regs=regs, mem=mem,funcs=funcs, prev_regs=prev_regs)
+        if want_prev_regs: prev_regs = u.prev_regs
+        inslist.append(u.res)
+      else: inslist.append(cpc)
+
+      if cpc in target_pc:
+        break
+    return inslist
+
+  def get_ins_info(self, cpc, regs=[], mem=[], funcs={}, prev_regs=[]):
+    ins_data = self.get_ins_data(cpc)
+    ins_str = self.arch.mc.ins_str(ins_data, addr=cpc)
+    ins_str2 = self.get_ins_str_gdb(pc=cpc)
+
+    res = cmisc.Attr(pc=cpc, ins_str2=ins_str2, ins_data=ins_data, failed=0, data={})
+
+    try:
+      ins = self.arch.mc.get_one_ins(ins_data, addr=cpc)
+      regcheck= self.arch.mc.get_reg_ops(ins)
+    except:
+      regcheck=['v0', 'v1', 'v2']
+      res.failed = 1
+
+    nregs = []
+    for reg in regcheck:
+      if reg in ('fp',): continue
+      if reg[0] == 'v':
+        nregs.append(reg + '.q.s[0]')
+        nregs.append(reg + '.q.u[0]')
+      else:
+        nregs.append(reg)
+
+    cregs = list(nregs) + regs
+    cregs.extend(prev_regs)
+    prev_regs = nregs
+
+
+    cmem = list(mem)
+    if cpc in funcs:
+      cf = funcs[cpc]
+      cmem.extend(cf.get('mem', []))
+      cregs.extend(cf.get('regs', []))
+      res.name = cf.name
+
+    res.regs=  self.snapshot_regs(cregs, main_obj=res.data, failsafe=1)
+    res.mem=  self.snapshot_mem(cmem, res.data)
+
+    return cmisc.Attr(res=res, prev_regs=prev_regs)
+
   def step_into(self, nsteps=1):
     for i in range(nsteps):
       res = self.do_execute('si')
@@ -212,10 +297,24 @@ class GdbDebugger(ExitStack):
     res = self.gdb.parse_and_eval('&{0}'.format(sym))
     return int(str(res).split(' ')[0], 16)
 
+  def set_reg(self, reg ,v):
+    return self.regs.set(reg, v)
+
+  def get_reg(self, reg):
+    return self.regs.get(reg)
+
+  def get_regs(self):
+    return self.regs
+
   def get_register(self, reg):
     cmd = '$%s' % reg
     res = self.gdb.parse_and_eval(cmd)
-    return int(str(res), 16)
+    try:
+      return int(str(res), 16)
+    except:
+      glog.info('Failed to get %s'%reg)
+      assert False, 'Failed to get reg %s'%reg
+      raise
 
   def set_register(self, reg, val):
     self.gdb.parse_and_eval('$%s = 0x%x' % (reg, val))
@@ -229,8 +328,55 @@ class GdbDebugger(ExitStack):
   def reg(self):
     return lambda x: self.get_register(x)
 
+  def snapshot_mem(self, q, main_obj=None):
+    res = {}
+    for x in q:
+      count = 1
+      if isinstance(x, int):
+        res[f'mem_{m:x}'] = cmisc.failsafe_or(lambda : self.mem.get_ptr(x), 0)
+      else:
+        reg, n, off, count  = x.reg, x.size, x.offset, x.get('count', 1)
+
+        addr=self.regs[reg]+off
+        ans = list(self.mem.read_n_u(addr, n, count))
+        res[f'mem_{reg}+0x{off:x}(={addr:x}'] = ans
+        if main_obj is not None and 'name' in x: main_obj[x.name] = ans
+
+    return res
+
+  def snapshot_regs(self, q, failsafe=0, main_obj=None):
+    tmp = set()
+    regname_to_name = {}
+    for r in q:
+      if isinstance(r, str):
+        tmp.add(r)
+      else:
+        tmp.add(r.reg)
+        if 'name' in r: regname_to_name[r.reg] = r.name
+    regs = self.regs.snapshot(tmp, failsafe=failsafe)
+
+    if main_obj is not None:
+      for r, name in regname_to_name.items():
+        main_obj[name] = regs[r]
+    return regs
+
+  def get_snapshot(self, nstack=0):
+    regs = self.regs.snapshot_all()
+    mem = []
+    for i in range(nstack):
+      mem.append(self.stack.get(i))
+    return cmisc.Attr(regs=regs, mem=mem)
+
+
   def get_memory(self, addr, l):
-    res = self.gdb.inferiors()[0].read_memory(addr, l)
+    ntry = 5
+    for i in range(ntry):
+      try:
+        res = self.gdb.inferiors()[0].read_memory(addr, l)
+      except Exception as e:
+        if i == ntry-1:
+          raise
+
     res = [res[i] for i in range(l)]
     res = b''.join(res)
     #read-write buffer object
@@ -260,6 +406,8 @@ class GdbDebugger(ExitStack):
       self.stop_handler = None
 
   def is_bpt_active(self, bp):
+    if isinstance(bp, int):
+      assert 0
     if not self.is_bpt():
       return False
     for b in self.stop_event.breakpoints:
@@ -289,10 +437,11 @@ class GdbDebugger(ExitStack):
     mc = MachineCaller(self.arch, self.regs, self.mem, self.runner())
     return mc
 
-  def run_to(self, addr):
-    bpt = self.set_bpt(addr, lambda _: True)
+  def run_to(self, addr, **kwargs):
+    bpt = self.set_bpt(addr, lambda _: True, **kwargs)
     self.resume()
     assert self.is_bpt_active(bpt)
+    self.del_bpt(bpt)
     return
 
   def extract_seccomp_filters(self, addr):

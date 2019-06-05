@@ -8,7 +8,7 @@ from elftools.elf.constants import P_FLAGS
 from chdrft.utils.misc import Dict, Attributize, opa_print, to_list, align
 import chdrft.utils.misc as cmisc
 from chdrft.emu.structures import Structure
-from chdrft.struct.base import Range1D
+from chdrft.struct.base import Range1D, Intervals
 
 MEM_FLAGS = P_FLAGS
 
@@ -62,6 +62,7 @@ class ElfUtils:
     self.arch_str = self.elf.get_machine_arch()
     from chdrft.emu.binary import guess_arch
     self.arch = guess_arch(self.arch_str)
+    assert self.arch is not None, self.arch_str
 
     dyn_section = self.get_section('.dynsym')
     if dyn_section and load_sym:
@@ -91,6 +92,12 @@ class ElfUtils:
     for seg in elf.iter_segments():
       if seg['p_type'] == 'PT_LOAD' and (seg['p_flags'] & P_FLAGS.PF_X) != 0:
         self.exec_segment = seg
+
+    self.symbol_inter = Intervals(use_range_data=1, merge=0)
+    for k, v in self.symbols.items():
+      self.symbol_inter.add(v, n=1, data=(k, v))
+    for k, v in self.dyn_symbols.items():
+      self.symbol_inter.add(v, n=1, data=(k, v))
 
     self.init_dynamic_tags()
     self.init_plt()
@@ -250,6 +257,12 @@ class ElfUtils:
     section = self.find_section(addr)
     if section is not None: return addr - section['sh_addr'] + section['sh_offset']
 
+
+  def find_symbol_by_addr(self, addr):
+    addr -= self.offset
+    res =  self.symbol_inter.query_data_raw(addr, closest=1)
+    if res is None: return None
+    return res[0], addr - res[1]
 
   def get_range(self, *args, **kwargs):
     r = Range1D(*args, **kwargs)

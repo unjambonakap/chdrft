@@ -3,6 +3,7 @@ import glog
 import bisect
 import numpy as np
 from collections import defaultdict
+from copy import copy
 
 from chdrft.utils.misc import to_list, Attributize, proc_path
 from sortedcontainers import SortedSet
@@ -12,36 +13,49 @@ import io
 
 class Range1D:
 
-  def __init__(self, *args, n=None):
+  def __init__(self, *args, n=None, is_int=0):
+    self.is_int=is_int
     if len(args) == 1:
       range1d = args[0]
       if isinstance(range1d, Range1D):
         self.low = range1d.low
         self.high = range1d.high
       else:
-        if isinstance(range1d, int):
-          self.low = range1d
-          self.high = self.low + n
-        else:
+        if isinstance(range1d, (list, tuple)):
           self.low = range1d[0]
           self.high = range1d[1]
+        else:
+          self.low = range1d
+          self.high = self.low + n
     elif len(args) == 2:
       self.low = args[0]
       self.high = args[1]
     else:
       assert 0
 
-    self._empty = self.low > self.high
+    if is_int:
+      self.low = int(self.low)
+      self.high = int(self.high)
+
+    if self.is_int:
+      self._empty = self.low >= self.high
+    else:
+      self._empty = self.low > self.high
+
+  @property
+  def window(self):
+    assert not self.empty
+    return slice(self.low, self.high)
 
   def clone(self):
-    return Range1D(self.low, self.high)
+    return self.make_new(self.low, self.high, is_int=self.is_int)
 
   @property
   def empty(self):
     return self._empty
 
   def clamp(self, *args):
-    other = Range1D(*args)
+    other = self.make_new(*args)
     self.low = max(self.low, other.low)
     self.high = min(self.high, other.high)
     return self
@@ -51,20 +65,25 @@ class Range1D:
     if self.high is not None: v = min(v, self.high)
     return v
 
+  def make_new(self, *args):
+    return Range1D(*args, is_int=self.is_int)
+
   def contains(self, other):
     if isinstance(other, Range1D):
       return self.low <= other.low and other.high <= self.high
+    elif self.is_int:
+      return self.low <= other < self.high
     else:
       return self.low <= other <= self.high
 
   def double(self):
     mid = self.mid
-    return Range1D([3 * self.low - 2 * mid, 3 * self.high - 2 * mid])
+    return self.make_new([3 * self.low - 2 * mid, 3 * self.high - 2 * mid])
 
   def expand(self, ratio):
     mid = self.mid
     l = self.length() / 2 * ratio
-    return Range1D(mid - l, mid + l)
+    return self.make_new(mid - l, mid + l)
 
   def cond(self, x):
     return self.low <= x and x <= self.high
@@ -73,9 +92,13 @@ class Range1D:
     return (self.low <= x, x <= self.high)
 
   def shift(self, v):
-    return Range1D(self.low + v, self.high + v)
+    return self.make_new(self.low + v, self.high + v)
 
   def length(self):
+    return self.high - self.low
+
+  @property
+  def n(self):
     return self.high - self.low
 
   def __len__(self):
@@ -85,16 +108,19 @@ class Range1D:
     return not self.intersection(other, adj=adj).empty
 
   def intersection(self, other, adj=0):
-    return Range1D(max(self.low, other.low), min(self.high, other.high) + adj)
+    return self.make_new(max(self.low, other.low), min(self.high, other.high) + adj)
 
   def union(self, other):
-    return Range1D(min(self.low, other.low), max(self.high, other.high))
+    return self.make_new(min(self.low, other.low), max(self.high, other.high))
 
   def __lt__(self, other):
     return self.as_tuple < other.as_tuple
 
   def __eq__(self, other):
     return self.as_tuple == other.as_tuple
+
+  def __sub__(self, a):
+    return self.make_new(self.low-a, self.high-a)
 
   @property
   def mid(self):
@@ -109,24 +135,29 @@ class Range1D:
 
   def __str__(self):
     if isinstance(self.low, int):
-      return 'Range1D(%x, %x)' % (self.low, self.high)
+      #return 'Range1D(%x, %x)' % (self.low, self.high)
+      return 'Range1D(%d, %d)' % (self.low, self.high)
     return f'Range1D({self.low}, {self.high})'
 
   def __repr__(self):
-    if isinstance(self.low, int): return repr(f'{self.low:x}, {self.high:x}')
+    #if isinstance(self.low, int): return repr(f'{self.low:x}, {self.high:x}')
+    if isinstance(self.low, int): return repr(f'{self.low:d}, {self.high:d}')
     return repr(f'{self.low}, {self.high}')
 
 
 class Range1DWithData(Range1D):
 
-  def __init__(self, *args, data=None, **kwargs):
+  def __init__(self, *args, data=None, merge_data=0, **kwargs):
     super().__init__(*args, **kwargs)
     self.data = data
+    self.merge_data = merge_data
 
   def union(self, other):
-    if other.high + 1 == self.low: return other.union(self)
-    assert self.high + 1 == other.low
-    return Range1DWithData(self.low, other.high, data=self.data + other.data)
+    if other.high == self.low: return other.union(self)
+    assert self.high == other.low, f'{self} {other}'
+    if self.merge_data:
+      return Range1DWithData(self.low, other.high, data=self.data + other.data)
+    return Range1DWithData(self.low, other.high, data=self.data)
 
   def get_data(self, qrange):
     assert self.contains(qrange)
@@ -151,6 +182,9 @@ class Range2D:
       self.yr = Range1D(args[1])
     else:
       assert 0
+  def __str__(self):
+    return f'Range2D({self.xr}, {self.yr})'
+
 
   def contains(self, other):
     return self.xr.contains(other.xr) and self.yr.contains(other.yr)
@@ -165,11 +199,17 @@ class Range2D:
     return pg.Point(self.xr.length(), self.yr.length())
 
 
+  def to_qrectf(self):
+    from pyqtgraph.Qt import QtCore
+    return QtCore.QRectF(self.xr.low, self.yr.low, self.xr.length(), self.yr.length())
+
 class Intervals:
 
-  def __init__(self, xl=[], regions=None, use_range_data=False):
+  def __init__(self, xl=[], regions=None, use_range_data=False, merge=1, is_int=None):
     self.xl = SortedSet()
     self.use_range_data = use_range_data
+    self.merge=  merge
+    self.is_int = is_int
     if regions is not None:
       xl = [r.getRegion() for r in regions]
     else:
@@ -182,6 +222,9 @@ class Intervals:
     glog.debug('Intervals >> %s', self.xl)
 
   def add(self, *args, **kwargs):
+    kwargs = dict(kwargs)
+    if self.is_int is not None:
+      kwargs['is_int'] = self.is_int
 
     if self.use_range_data:
       elem = Range1DWithData(*args, **kwargs)
@@ -194,13 +237,15 @@ class Intervals:
     next_pos = pos + 1
     if pos > 0:
       prev = self.xl[pos - 1]
-      if prev.contains(elem.low - 1):
+      if self.merge and prev.contains(elem.low - 1):
         self.xl.pop(pos - 1)
 
         ne = prev.union(elem)
         self.xl.add(ne)
         cur = ne
         next_pos = pos
+      else:
+        assert elem.low >= prev.high
 
     if cur is None:
       cur = elem
@@ -211,7 +256,7 @@ class Intervals:
     next_pos -= 1
     while next_pos < len(self.xl):
       next = self.xl[next_pos]
-      if cur.high + 1 < next.low:
+      if cur.high < next.low:
         break
       self.xl.pop(next_pos)
       cur = cur.union(next)
@@ -251,7 +296,9 @@ class Intervals:
       if last is None or last.high + merge_dist < x:
         if last is not None:
           res.xl.add(last)
-        last = Range1D(x, x)
+        last = Range1D(x, x, is_int=1)
+      else:
+        print('mergin here', x, last.low)
       last.high = x
     if last is not None:
       res.xl.add(last)
@@ -259,11 +306,11 @@ class Intervals:
     return res
 
   def complement(self, superset):
-    superset = Range1D(superset)
-    cur = Range1D(superset.low, 0)
+    superset = Range1D(superset, is_int=1)
+    cur = Range1D(superset.low, 0, is_int=1)
     res = Intervals()
 
-    for e in list(self.xl) + [Range1D(superset.high, 0)]:
+    for e in list(self.xl) + [Range1D(superset.high, 0, is_int=1)]:
       cur.high = e.low - 1
       res.xl.add(cur.clone())
       cur.low = e.high + 1
@@ -272,13 +319,13 @@ class Intervals:
   def shorten(self, val):
     res = Intervals()
     for x in self.xl:
-      res.add(Range1D(x.low + val, x.high - val))
+      res.add(Range1D(x.low + val, x.high - val, is_int=1))
     return res
 
   def expand(self, val):
     res = Intervals()
     for x in self.xl:
-      res.add(Range1D(x.low - val, x.high + val))
+      res.add(Range1D(x.low - val, x.high + val, is_int=1))
     return res
 
   def filter(self, func):
@@ -294,11 +341,26 @@ class Intervals:
       res.add(Range1D(x.low + p, x.high + p))
     return res
 
-  def query(self, q):
+  def query(self, q, closest=0):
     pos = self.xl.bisect_left(Range1D(q, math.inf))
     if pos == 0: return None
-    if q <= self.xl[pos - 1].high: return self.xl[pos - 1]
+    if closest or q <= self.xl[pos - 1].high: return self.xl[pos - 1]
     return None
+
+  def query_data_do(self, q, action, fail_if_not=0):
+    obj = self.query(q)
+
+    assert obj is not None or not fail_if_not, hex(q)
+    if obj is None:
+      return None
+    return action(obj.data, q - obj.low)
+
+  def query_data_raw(self, q, **kwargs):
+    q = self.query(q, **kwargs)
+    if q is None: return None
+    return q.data
+
+    return found_range.get_data(qr)
 
   def query_data(self, qr):
     found_range = self.query(qr.low)
@@ -326,6 +388,11 @@ class Intervals:
     s.close()
     return res
 
+  def group_by(self, tb, res=defaultdict(list)):
+    res = copy(res)
+    for pos, data in tb:
+      res[self.query(pos)].append(data)
+    return res
 
 def get_primitive_ranges(la, lb):
   res = []

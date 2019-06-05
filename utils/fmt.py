@@ -7,6 +7,11 @@ import yaml
 from asq.initiators import query
 from chdrft.utils.arg_gram import LazyConf
 
+def bit2num(tb):
+  res = 0
+  for i in reversed(tb):
+    res= res << 1 | i
+  return res
 
 class Format(object):
 
@@ -105,8 +110,8 @@ class Format(object):
     oldn = n
     import numpy as np
     n = max(0, n - len(v))
-    if isinstance(v, list):
-      self.v = list(v) + ([fill] * n)
+    if isinstance(v, (list, tuple)):
+      self.v = type(v)(list(v) + ([fill] * n))
     elif isinstance(v, bytes):
       self.v = v + bytes([fill] * n)
     elif isinstance(v, bytearray):
@@ -135,7 +140,7 @@ class Format(object):
     return self.pad(rem + len(self.v), fill)
 
   def bucket(self, grouplen, default=0):
-    self.modpad(grouplen, default)
+    if default is not None: self.modpad(grouplen, default)
     res = []
     for i in range(0, len(self.v), grouplen):
       res.append(self.v[i:i + grouplen])
@@ -190,6 +195,17 @@ class Format(object):
     else:
       assert 0
     return self
+
+  def bit2num(self, blk_size=-1):
+    cur = self.v
+    if blk_size == -1:
+      self.v = bit2num(cur)
+    else:
+      self.v = []
+      for i in range(0, len(cur), blk_size):
+        self.v.append(bit2num(cur[i:i+blk_size]))
+    return self
+
 
   def bin2byte(self, lsb=False):
     if isinstance(self.v, str):

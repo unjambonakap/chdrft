@@ -24,45 +24,62 @@ from chdrft.gen.types import types_helper_by_m32
 from chdrft.utils.cmdify import ActionHandler
 from chdrft.cmds import CmdsList
 from chdrft.main import app
+from chdrft.utils.path import FileFormatHelper
 
+uc =  None
 try:
   import capstone as cs
   from capstone.x86_const import *
   import capstone.x86_const as cs_x86_const
   import capstone.arm_const as cs_arm_const
+  import capstone.arm64_const as cs_arm64_const
   import unicorn.x86_const as x86_const
   import unicorn.arm_const as arm_const
+  import unicorn.arm64_const as arm64_const
 
   import unicorn.mips_const as mips_const
   import capstone.mips_const as cs_mips_const
   import unicorn as uc
 except Exception as e:
-  traceback.print_exc(e)
+  exc_type, exc_value, exc_traceback = sys.exc_info()
   print('Got exception', e)
+  traceback.print_tb(exc_traceback)
   pass
 
 
 class UCX86Regs(RegExtractor):
 
-  def __init__(self):
+  def __init__(self, *args):
     super().__init__(x86_const, 'UC_X86_REG_')
+
+
+class UCARM64Regs(RegExtractor):
+
+  def __init__(self, *args):
+    super().__init__(arm64_const, 'UC_ARM64_REG_')
 
 
 class UCARMRegs(RegExtractor):
 
-  def __init__(self):
+  def __init__(self, *args):
     super().__init__(arm_const, 'UC_ARM_REG_')
 
 
 class CSX86Regs(RegExtractor):
 
-  def __init__(self):
+  def __init__(self, *args):
     super().__init__(cs_x86_const, 'X86_REG_')
+
+
+class CSARM64Regs(RegExtractor):
+
+  def __init__(self, *args):
+    super().__init__(cs_arm64_const, 'ARM64_REG_')
 
 
 class CSARMRegs(RegExtractor):
 
-  def __init__(self):
+  def __init__(self, *args):
     super().__init__(cs_arm_const, 'ARM_REG_')
 
 
@@ -89,6 +106,8 @@ mips_regs = cmisc.to_list(
 x86_redirects = dict()
 #x86_redirects = dict(fs_base='fs', gs_base='gs')
 arm_regs = list(['r%d' % i for i in range(13)] + cmisc.to_list('sp lr pc cpsr'))
+arm64_regs = list(['x%d' % i for i in range(31)] + cmisc.to_list('sp pc lr cpacr_el1 tpidr_el0'))
+#arm64_regs += list(['q%d' % i for i in range(31)])
 
 class RegRelationX86:
 
@@ -159,123 +178,6 @@ def norm_ins(code):
 
 
 
-x86_16_arch = Attributize(
-    regs=x86_16_regs,
-    ins_size=-1,
-    reg_size=2,
-    reg_pc='ip',
-    reg_stack='sp',
-    cs_arch=cs.CS_ARCH_X86,
-    cs_mode=cs.CS_MODE_16,
-    uc_arch=uc.UC_ARCH_X86,
-    uc_mode=uc.UC_MODE_16,
-    cs_regs=CSX86Regs(),
-    uc_regs=UCX86Regs(),
-    reg_rel=RegRelationX86(),
-    call_data=Attributize(reg_return='ax', reg_call=(), has_link=False),
-    redirect=x86_redirects,
-  flags_desc=(ebase.eflags, 'eflags'),
-)
-
-x86_arch = Attributize(
-    regs=x86_regs,
-    ins_size=-1,
-    reg_size=4,
-    reg_pc='eip',
-    reg_stack='esp',
-    cs_arch=cs.CS_ARCH_X86,
-    cs_mode=cs.CS_MODE_32,
-    uc_arch=uc.UC_ARCH_X86,
-    uc_mode=uc.UC_MODE_32,
-    cs_regs=CSX86Regs(),
-    uc_regs=UCX86Regs(),
-    reg_rel=RegRelationX86(),
-    call_data=Attributize(reg_return='eax', reg_call=(), has_link=False),
-    redirect=x86_redirects,
-)
-
-x86_64_arch = Attributize(
-    regs=x86_64_regs,
-    ins_size=-1,
-    reg_size=8,
-    reg_pc='rip',
-    reg_stack='rsp',
-    cs_arch=cs.CS_ARCH_X86,
-    cs_mode=cs.CS_MODE_64,
-    uc_arch=uc.UC_ARCH_X86,
-    uc_mode=uc.UC_MODE_64,
-    cs_regs=CSX86Regs(),
-    uc_regs=UCX86Regs(),
-    reg_rel=RegRelationX86(),
-    FSMSR = 0xC0000100,
-    GSMSR = 0xC0000101,
-    call_data=(
-      Attributize(typ='linux',reg_return='rax', reg_call=cmisc.to_list('rdi rsi rdx'), has_link=False),
-      Attributize(typ='win', reg_return='rax', reg_call=cmisc.to_list('rcx rdx r8 r9'), has_link=False),
-      )
-      ,
-    syscall_conv=cmisc.to_list('rdi rsi rdx rcx r8 r9'),
-    redirect=x86_redirects,
-)
-
-mips_arch = Attributize(
-    regs=mips_regs,
-    ins_size=4,
-    reg_size=4,
-    reg_pc='pc',
-    reg_link='ra',
-    reg_stack='sp',
-    cs_arch=cs.CS_ARCH_MIPS,
-    cs_mode=cs.CS_MODE_MIPS32 | cs.CS_MODE_LITTLE_ENDIAN,
-    call_data=Attributize(reg_return='v0', reg_call=cmisc.to_list('a0 a1 a2 a3')),
-    uc_arch=uc.UC_ARCH_MIPS,
-    uc_mode=uc.UC_MODE_MIPS32 | uc.UC_MODE_LITTLE_ENDIAN,
-    cs_regs=CSMipsRegs(),
-    uc_regs=UCMipsRegs(),
-)
-
-arm_arch = Attributize(
-    regs=arm_regs,
-    ins_size=4,
-    reg_size=4,
-    reg_pc='pc',
-    reg_link='lr',
-    reg_stack='sp',
-    cs_arch=cs.CS_ARCH_ARM,
-    cs_mode=0,
-    call_data=Attributize(reg_return='r0', reg_call=cmisc.to_list('r0 r1 r2 r3')),
-    uc_arch=uc.UC_ARCH_ARM,
-    uc_mode=0,
-    cs_regs=CSARMRegs(),
-    uc_regs=UCARMRegs(),
-)
-
-thumb_arch = Attributize(
-    regs=arm_regs,
-    ins_size=2,
-    reg_size=4,
-    reg_pc='pc',
-    reg_link='lr',
-    reg_stack='sp',
-    cs_arch=cs.CS_ARCH_ARM,
-    cs_mode=cs.CS_MODE_THUMB,
-    uc_arch=uc.UC_ARCH_ARM,
-    uc_mode=uc.UC_MODE_THUMB,
-    cs_regs=CSARMRegs(),
-    uc_regs=UCARMRegs(),
-    call_data=Attributize(reg_return='r0', reg_call=cmisc.to_list('r0 r1 r2 r3')),
-)
-
-arch_data = {
-    Arch.x86_64: x86_64_arch,
-    Arch.x86: x86_arch,
-    Arch.x86_16: x86_16_arch,
-    Arch.mips: mips_arch,
-    Arch.arm: arm_arch,
-    Arch.thumb: thumb_arch,
-}
-
-
 class CallData:
   def __init__(self, arch, x):
     if not isinstance(x, tuple): x= tuple((x,))
@@ -299,20 +201,13 @@ class CallData:
       return addr | 1
     return addr
 
-for k, v in arch_data.items():
-  v.typ = k
-  if v.reg_size == 4: v.typs_helper = types_helper_by_m32[True]
-  elif v.reg_size == 8: v.typs_helper = types_helper_by_m32[False]
-
-  if 'call_data' in v: v.call_data=CallData(v, v.call_data)
-
-  v.typs = None
-
 
 def guess_arch(s):
+  s = s.lower()
   if s.find('x86-64') != -1 or s.find('x86_64') != -1: return arch_data[Arch.x86_64]
   if s.find('x64') != -1: return arch_data[Arch.x86_64]
   if s.find('i386') != -1: return arch_data[Arch.x86]
+  if s.find('aarch64') != -1: return arch_data[Arch.arm64]
   for v in Arch:
     if s == v.name: return arch_data[v]
   for v in Arch:
@@ -358,7 +253,7 @@ class Machine:
 
   def get_one_ins(self, data, addr=0):
     tmp = self.get_ins(data, addr)
-    assert len(tmp) > 0, 'Bad turd for %s %s' % (data, addr)
+    assert len(tmp) > 0, 'Bad turd for %s %x' % (data, addr)
     return tmp[0]
 
   def disp_ins(self, data, addr=0):
@@ -368,7 +263,9 @@ class Machine:
   def print_insn(self, ins):
     print("0x%x: %s %s" % (ins.address, ins.mnemonic, ins.op_str), bytes(ins.bytes))
 
-  def ins_str(self, ins):
+  def ins_str(self, ins, addr=0):
+    if isinstance(ins, (bytes, bytearray)):
+      ins = self.get_ins(ins, addr=addr)
     if isinstance(ins, list):
       return ' ; '.join([self.ins_str(x) for x in ins])
     return "0x%x: %s %s %s" % (
@@ -395,6 +292,24 @@ class ThumbMachine(Machine):
   def get_disassembly(self, code, addr=0, **kwargs):
     compiler = ArmCompiler(thumb=1, **kwargs)
     return compiler.get_assembly(code)
+
+class Arm64Machine(Machine):
+
+  def __init__(self):
+    super().__init__(Arch.arm64)
+
+  def get_reg_ops(self, ins):
+    lst = []
+    for op in ins.operands:
+      if op.type == cs.arm64_const.ARM64_OP_REG:
+        lst.append(self.arch.cs_regs.get_name(op.reg))
+      elif op.type == cs.arm64_const.ARM64_OP_MEM:
+        if op.value.mem.base != 0:
+          lst.append(ins.reg_name(op.value.mem.base))
+        if op.value.mem.index != 0:
+          lst.append(ins.reg_name(op.value.mem.index))
+
+    return lst
 
 class MipsMachine(Machine):
 
@@ -463,19 +378,167 @@ class X86Machine(Machine):
     return lst
 
 
-x64_mc = X86Machine(True)
-x86_mc = X86Machine(False)
-x86_16_mc = X86Machine(bit16=True)
-arm_mc = ArmMachine()
-thumb_mc = ThumbMachine()
-mips_mc = MipsMachine()
+if not uc:
+  arch_data = None
+else:
+  x86_16_arch = Attributize(
+      regs=x86_16_regs,
+      ins_size=-1,
+      reg_size=2,
+      reg_pc='ip',
+      reg_stack='sp',
+      cs_arch=cs.CS_ARCH_X86,
+      cs_mode=cs.CS_MODE_16,
+      uc_arch=uc.UC_ARCH_X86,
+      uc_mode=uc.UC_MODE_16,
+      cs_regs=CSX86Regs(),
+      uc_regs=UCX86Regs(),
+      reg_rel=RegRelationX86(),
+      call_data=Attributize(reg_return='ax', reg_call=(), has_link=False),
+      redirect=x86_redirects,
+    flags_desc=(ebase.eflags, 'eflags'),
+  )
 
-arch_data[Arch.x86_16].mc = x86_16_mc
-arch_data[Arch.x86].mc = x86_mc
-arch_data[Arch.x86_64].mc = x64_mc
-arch_data[Arch.mips].mc = mips_mc
-arch_data[Arch.arm].mc = arm_mc
-arch_data[Arch.thumb].mc = thumb_mc
+  x86_arch = Attributize(
+      regs=x86_regs,
+      ins_size=-1,
+      reg_size=4,
+      reg_pc='eip',
+      reg_stack='esp',
+      cs_arch=cs.CS_ARCH_X86,
+      cs_mode=cs.CS_MODE_32,
+      uc_arch=uc.UC_ARCH_X86,
+      uc_mode=uc.UC_MODE_32,
+      cs_regs=CSX86Regs(),
+      uc_regs=UCX86Regs(),
+      reg_rel=RegRelationX86(),
+      call_data=Attributize(reg_return='eax', reg_call=(), has_link=False),
+      redirect=x86_redirects,
+  )
+
+  x86_64_arch = Attributize(
+      regs=x86_64_regs,
+      ins_size=-1,
+      reg_size=8,
+      reg_pc='rip',
+      reg_stack='rsp',
+      cs_arch=cs.CS_ARCH_X86,
+      cs_mode=cs.CS_MODE_64,
+      uc_arch=uc.UC_ARCH_X86,
+      uc_mode=uc.UC_MODE_64,
+      cs_regs=CSX86Regs(),
+      uc_regs=UCX86Regs(),
+      reg_rel=RegRelationX86(),
+      FSMSR = 0xC0000100,
+      GSMSR = 0xC0000101,
+      call_data=(
+        Attributize(typ='linux',reg_return='rax', reg_call=cmisc.to_list('rdi rsi rdx'), has_link=False),
+        Attributize(typ='win', reg_return='rax', reg_call=cmisc.to_list('rcx rdx r8 r9'), has_link=False),
+        )
+        ,
+      syscall_conv=cmisc.to_list('rdi rsi rdx rcx r8 r9'),
+      redirect=x86_redirects,
+  )
+
+  mips_arch = Attributize(
+      regs=mips_regs,
+      ins_size=4,
+      reg_size=4,
+      reg_pc='pc',
+      reg_link='ra',
+      reg_stack='sp',
+      cs_arch=cs.CS_ARCH_MIPS,
+      cs_mode=cs.CS_MODE_MIPS32 | cs.CS_MODE_LITTLE_ENDIAN,
+      call_data=Attributize(reg_return='v0', reg_call=cmisc.to_list('a0 a1 a2 a3')),
+      uc_arch=uc.UC_ARCH_MIPS,
+      uc_mode=uc.UC_MODE_MIPS32 | uc.UC_MODE_LITTLE_ENDIAN,
+      cs_regs=CSMipsRegs(),
+      uc_regs=UCMipsRegs(),
+  )
+
+  arm_arch = Attributize(
+      regs=arm_regs,
+      ins_size=4,
+      reg_size=4,
+      reg_pc='pc',
+      reg_link='lr',
+      reg_stack='sp',
+      cs_arch=cs.CS_ARCH_ARM,
+      cs_mode=0,
+      call_data=Attributize(reg_return='r0', reg_call=cmisc.to_list('r0 r1 r2 r3')),
+      uc_arch=uc.UC_ARCH_ARM,
+      uc_mode=0,
+      cs_regs=CSARMRegs(),
+      uc_regs=UCARMRegs(),
+  )
+
+
+  arm64_arch = Attributize(
+      regs=arm64_regs,
+      ins_size=4,
+      reg_size=8,
+      reg_pc='pc',
+      reg_link='lr',
+      reg_stack='sp',
+      cs_arch=cs.CS_ARCH_ARM64,
+      cs_mode=0,
+      uc_arch=uc.UC_ARCH_ARM64,
+      uc_mode=0,
+      cs_regs=CSARM64Regs(),
+      uc_regs=UCARM64Regs(),
+      do_normalize=0,
+  )
+
+  thumb_arch = Attributize(
+      regs=arm_regs,
+      ins_size=2,
+      reg_size=4,
+      reg_pc='pc',
+      reg_link='lr',
+      reg_stack='sp',
+      cs_arch=cs.CS_ARCH_ARM,
+      cs_mode=cs.CS_MODE_THUMB,
+      uc_arch=uc.UC_ARCH_ARM,
+      uc_mode=uc.UC_MODE_THUMB,
+      cs_regs=CSARMRegs(),
+      uc_regs=UCARMRegs(),
+      call_data=Attributize(reg_return='r0', reg_call=cmisc.to_list('r0 r1 r2 r3')),
+  )
+
+  arch_data = {
+      Arch.x86_64: x86_64_arch,
+      Arch.x86: x86_arch,
+      Arch.x86_16: x86_16_arch,
+      Arch.mips: mips_arch,
+      Arch.arm: arm_arch,
+      Arch.arm64: arm64_arch,
+      Arch.thumb: thumb_arch,
+  }
+
+  for k, v in arch_data.items():
+    v.typ = k
+    if v.reg_size == 4: v.typs_helper = types_helper_by_m32[True]
+    elif v.reg_size == 8: v.typs_helper = types_helper_by_m32[False]
+
+    if 'call_data' in v: v.call_data=CallData(v, v.call_data)
+
+    v.typs = None
+
+  x64_mc = X86Machine(True)
+  x86_mc = X86Machine(False)
+  x86_16_mc = X86Machine(bit16=True)
+  arm_mc = ArmMachine()
+  thumb_mc = ThumbMachine()
+  mips_mc = MipsMachine()
+  arm64_mc = Arm64Machine()
+
+  arch_data[Arch.x86_16].mc = x86_16_mc
+  arch_data[Arch.x86].mc = x86_mc
+  arch_data[Arch.x86_64].mc = x64_mc
+  arch_data[Arch.mips].mc = mips_mc
+  arch_data[Arch.arm].mc = arm_mc
+  arch_data[Arch.arm64].mc = arm64_mc
+  arch_data[Arch.thumb].mc = thumb_mc
 
 import sys
 
@@ -981,7 +1044,10 @@ cache = None
 
 def args(parser):
   clist = CmdsList().add(test)
-  ActionHandler.Prepare(parser, clist.lst, global_action=0)
+  parser.add_argument('--arch', type=guess_arch)
+  parser.add_argument('--data', type=FileFormatHelper.Read)
+  parser.add_argument('--addr', type=cmisc.to_int, default=0)
+  ActionHandler.Prepare(parser, clist.lst, global_action=1)
 
 
 def test(ctx):
@@ -997,9 +1063,26 @@ def test(ctx):
 START:
   ''')
   import codecs
-  mc.disp_ins(res)
+  mc.disp_ins(res, addr=ctx.addr)
   print(codecs.encode(res, 'hex'))
 
+
+
+def str_to_bytes(s):
+  try:
+    return bytes(exec(s))
+  except:
+    pass
+
+  res = []
+  for line  in s.split('\n'):
+    dx  = line.find(':')
+    if dx!=-1: line = line[dx+1:]
+    res.extend( map(cmisc.to_int, line.split()))
+  return bytes(res)
+
+def disassemble(ctx):
+  ctx.arch.mc.disp_ins(str_to_bytes(ctx.data), addr=ctx.addr)
 
 def main():
   ctx = Attributize()

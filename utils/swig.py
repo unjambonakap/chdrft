@@ -26,7 +26,9 @@ class Swig:
 
   def init(self):
     from opa_common_swig import opa_init_swig
-    opa_init_swig(['dummy'] + self.args)
+    args  = ['dummy'] + self.args
+    args = list(map(str.encode, args))
+    opa_init_swig(args)
 
   def setup(self, args=None):
     if args is None:
@@ -48,6 +50,7 @@ class Swig:
         'opa_engine_swig',
         'opa_wrapper_swig',
         'opa_dsp_swig',
+        'opa_test_swig',
     ]
     self._initialized = True
 

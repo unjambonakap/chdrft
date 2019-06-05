@@ -1,3 +1,4 @@
+import chdrft.display.base
 from IPython.utils.frame import extract_module_locals
 from chdrft.utils.swig import swig
 from asq.initiators import query as asq_query
@@ -12,7 +13,6 @@ from scipy import optimize
 from scipy import signal
 from scipy import cluster
 from scipy import stats
-import chdrft.display.test_ui as test_ui
 import glog
 import math
 import numpy as np
@@ -22,10 +22,21 @@ import pyqtgraph.ptime as ptime
 import scipy.ndimage as ndimage
 import sys
 import tempfile
+from scipy.stats.mstats import mquantiles
+
+def norm_angle(x):
+  while abs(x) > math.pi:
+    if x > 0:
+      x -= 2 * math.pi
+    else:
+      x += 2 * math.pi
+  return x
+
+def norm_angle_from(src, dest):
+  return src + norm_angle(dest - src)
 
 
 class DataFile:
-
   def __init__(self, filename, typ=None, samp_rate=None, **kwargs):
     self.filename = filename
     typ_map = {'adcpro': 'adcpro', 'float32': np.float32}
@@ -39,6 +50,9 @@ class DataFile:
       data, samp_rate = DataSet.load_adcpro(filename)
     elif typ == 'csv':
       data = pd.read_csv(filename, **kwargs)
+    elif typ == 'complex8':
+      tmp = np.fromfile(filename, np.int8)
+      data = tmp[::2] + 1j * tmp[1::2]
     else:
       data = np.fromfile(filename, typ)
 
@@ -60,7 +74,10 @@ class DataFile:
     return self.data.columns.values[i]
 
   def to_ds(self, i=0, **kwargs):
-    return DataSet(self.col(i), **kwargs)
+    tmp = dict(kwargs)
+    if 'samp_rate' not in tmp:
+      tmp['samp_rate']=  self.samp_rate
+    return DataSet(self.col(i), **tmp)
 
   @staticmethod
   def load_adcpro(filename):
@@ -89,6 +106,23 @@ class DataFile:
     x = [(e - low_in) * coeff + low_out for e in x]
     return [list(x)], float(params['Sampling Frequency'])
 
+class Dataset2D:
+  def __init__(self, y, x0, x1):
+    self.y = y
+    self.x0 = x0
+    self.x1 = x1
+
+  def transpose(self):
+    norder = list(range(self.y.ndim))
+    norder[0:2] = [1,0]
+    return Dataset2D(np.transpose(self.y, norder), self.x1, self.x0)
+
+  def new_y(self, ny):
+    return Dataset2D(ny, self.x0, self.x1)
+
+  @property
+  def range2d(self):
+    return Range2D((self.x0[0], self.x0[-1]), (self.x1[0], self.x1[-1]))
 
 class DataSet:
 
@@ -99,23 +133,25 @@ class DataSet:
       samp_rate = None
 
     self.n = len(self.y)
-    self.samp_rate = samp_rate
     self.x = x
     if name is None and orig_dataset is not None:
       name = orig_dataset.name + "'"
 
     self.name = name
-    if orig_dataset is not None and self.samp_rate is None:
-      self.samp_rate = orig_dataset.samp_rate
+    if orig_dataset is not None and samp_rate is None:
+      samp_rate = orig_dataset.samp_rate
 
     if x is None:
       if orig_dataset is not None:
         if len(y) == orig_dataset.n:
           self.x = orig_dataset.x
+
+
       if x is None:
-        glog.info('Defaulting to 1Hz sample rate, as not specified')
-        self.samp_rate = 1
-        self.reset_x(self.samp_rate)
+        if samp_rate is None: samp_rate = 1
+        glog.info(f'Building x with samp rate {samp_rate}')
+        self.reset_x(samp_rate)
+    self.samp_rate = samp_rate
 
     if self.samp_rate is None:
       if len(self.x) < 2:
@@ -140,6 +176,7 @@ class DataSet:
     if samp_rate is not None:
       self.samp_rate = samp_rate
     self.x = np.linspace(shift, self.n / self.samp_rate + shift, self.n)
+    assert len(self.x) == self.n
     return self
 
   def min_x(self):
@@ -269,7 +306,6 @@ class DataSet:
       assert False
     else:
       assert x.step is None or x.step == 1
-      assert x.stop > 0
 
       print(x)
       print(type(self.x))
@@ -279,9 +315,8 @@ class DataSet:
       res = self.make_new('select_%s' % x, x=nx, y=ny)
       return res
 
-  @staticmethod
-  def to_file(y, filename, typ='float32'):
-    DataOp.ToFile(y, filename, typ)
+  def to_file(self, filename, typ='float32'):
+    DataOp.ToFile(self.y, filename, typ)
 
   @staticmethod
   def FromImpulse(at, eps=1e-4, maxy=1e5, orig_dataset=None):
@@ -304,6 +339,12 @@ class DataSet:
       prev = v
     return DataSet(yl, x=xl)
 
+  @property
+  def mod(self):
+    #TODO (ease with dataop)
+    pass
+
+
 
 class DynamicDataset(DataSet):
   def __init__(self, y, **kwargs):
@@ -318,11 +359,28 @@ class DynamicDataset(DataSet):
 
 
 class DataOp:
+  @staticmethod
+  def MakeOrthogonal(a, b, debug=0):
+    k = np.dot(a,b) / np.dot(b,b)
+    res = a-k*b
+    if debug:
+      return res,k
+    return res
 
   @staticmethod
-  def Power(data, alpha=0.1):
-    data = np.abs(data)**2
-    return signal.lfilter([alpha], [1, -(1 - alpha)], data)
+  def GetBPSKBits(bits):
+    bits = np.array(bits)
+    soft_trans = np.abs(np.diff(np.unwrap(bits))) % (2 * np.pi) / np.pi
+    hard_trans = soft_trans >= 0.5
+    return np.array([0] + list(np.cumsum(hard_trans))) % 2
+
+  @staticmethod
+  def Power(data):
+    return np.linalg.norm(data)**2 / len(data)
+
+  @staticmethod
+  def Power_Db(data):
+    return 10*np.log10(DataOp.Power(data))
 
   @staticmethod
   def Hysteresis2(data, ratio=None, low=None, high=None, avg=None):
@@ -665,11 +723,34 @@ class DataOp:
       cur = np.multiply(cur, hann)
 
       now = np.abs(fftpack.fft(cur))
-      now = np.log(now)
+      now = 20 * np.log(now)
       fall_data.append(now)
 
     fall_data = np.array(fall_data)
     return fall_data
+
+  @staticmethod
+  def FreqWaterfall_DS(ds, window_size):
+    hann = signal.hanning(window_size)
+    fall_data = []
+    data = Format(ds.y).modpad(window_size, 0).v
+    axis_t = []
+
+    samp_rate = ds.samp_rate
+    axis_f = np.linspace(-0.5 * samp_rate, 0.5 * samp_rate, window_size)
+    print('gogo', ds.samp_rate)
+    for i in range(0, len(data), window_size):
+      axis_t.append(i / ds.samp_rate)
+      cur = data[i:i + window_size]
+      cur = np.multiply(cur, hann)
+
+      now = np.abs(fftpack.fft(cur))
+      now = 20 * np.log(now / window_size)
+      fall_data.append(now)
+
+    fall_data = np.array(fall_data)
+    fall_data = np.roll(fall_data, window_size // 2, axis=1)
+    return Dataset2D(fall_data, axis_t, axis_f)
 
   @staticmethod
   def FreqSpectrum(data, window_size, agg='max'):
@@ -723,3 +804,39 @@ class DataOp:
     return np.array(vals), np.array(sample_times)
 
 
+
+def linearize(x, a, b, na, nb):
+  ratio = (nb - na) / (b - a)
+  return (x - a) * ratio + na
+
+def linearize_clamp(x, a, b, na, nb):
+  tmp = linearize(x, a, b, na, nb)
+  return np.clip(tmp, na, nb)
+class FFTHelper:
+  def __init__(self):
+    from vispy.color import get_colormap
+    self.cmap = get_colormap('viridis')
+
+  def map0(self, f, maxv=0, minv=-60, quant=None):
+    f = np.ravel(f)
+    if quant is not None:
+      minv,maxv = mquantiles(f, [quant, 1-quant])
+
+    return linearize_clamp(f, minv, maxv, 0, 1)
+
+  def map(self, f, **kwargs):
+    shape = np.shape(f)
+    cf =  self.cmap.map(self.map0(f, **kwargs))
+    res =  np.reshape(cf, shape + (4,))
+    return res
+
+g_fft_helper = FFTHelper()
+
+
+def compute_normed_correl(haystack, needle):
+  needle = needle - np.mean(needle)
+  needle = needle / np.linalg.norm(needle)
+  haystack = haystack - np.mean(haystack)
+  haystack = haystack / np.linalg.norm(haystack) * len(haystack) / len(needle)
+
+  return signal.correlate(haystack, needle, mode='valid')

@@ -10,6 +10,7 @@ from inspect import signature
 import chdrft.utils.misc as cmisc
 from contextlib import ExitStack
 from chdrft.tools.xxd import xxd
+from chdrft.struct.base import Intervals
 
 from chdrft.utils.misc import Attributize, lowercase_norm, Arch, struct_helper, csv_list
 
@@ -114,7 +115,7 @@ class RegExtractor(Attributize):
 
 class Regs:
 
-  def __init__(self, arch, **kwargs):
+  def __init__(self, arch, do_normalize=1, **kwargs):
     redirect = dict(ins_pointer=arch.reg_pc, stack_pointer=arch.reg_stack)
     if 'redirect' in arch: redirect.update(arch.redirect)
 
@@ -122,11 +123,10 @@ class Regs:
       desc, field = arch.flags_desc
       gs = FieldGetSet(self, field)
       self.__dict__.update(flags=BitFieldWrapper(desc, gettersetter=gs))
-    self.__dict__.update(arch=arch, redirect=redirect, **kwargs)
+    self.__dict__.update(arch=arch, do_normalize=do_normalize, redirect=redirect, **kwargs)
 
   def reg_list(self):
     return self.arch.regs
-
 
   def __getattr__(self, name):
     return self.get(name)
@@ -148,7 +148,8 @@ class Regs:
     return self.get_register(name)
 
   def normalize(self, name):
-    name = lowercase_norm(name)
+    if self.arch.get('do_normalize', 1):
+      name = lowercase_norm(name)
     if name in self.redirect:
       name = self.redirect[name]
     return name
@@ -184,7 +185,17 @@ class Regs:
     return res
 
   def snapshot_all(self):
-    return Attributize({x: self[x] for x in self.arch.regs})
+    return self.snapshot(self.arch.regs)
+
+  def snapshot(self, want, failsafe=0):
+    res = {}
+    for x  in want:
+      try:
+        res[x] = self[x]
+      except:
+        if not failsafe:
+          raise
+    return cmisc.Attr(res)
 
   def context(self, lst):
     return RegContext(self, lst)
@@ -265,7 +276,6 @@ class Memory:
 
     self.read_funcs += csv_list('read,read2,unpack,read_u')
     self.write_funcs += csv_list('write,write_u')
-    print('GOT LE >> ', le)
 
   def add_read_func(self, name, func):
     self.read_funcs.append(name)
@@ -299,12 +309,12 @@ class Memory:
 
     def g(addr, ):
       y = self.reader(addr, fmt_size)
-      if y is not None: y = self.reader(addr, fmt_size * n)
+      #if y is not None: y = self.reader(addr, fmt_size * n)
       return struct.unpack(self.le_sgn + '%c' % fmt, y)[0]
 
     def ng(addr=None, n=None, sz=None, y=None):
       if sz is not None: n = sz // fmt_size
-      if y is not None: y = self.reader(addr, fmt_size * n)
+      if y is None: y = self.reader(addr, fmt_size * n)
       return struct.unpack(self.le_sgn + '%d%c' % (n, fmt), y)
 
     def s(addr, val):
@@ -312,7 +322,7 @@ class Memory:
       self.writer(addr, packed_val)
 
     def ns(addr, tb):
-      packed_val = struct.pack(self.le_sgn + '%d%c' % (len(tb), fmt), tb)
+      packed_val = struct.pack(self.le_sgn + '%d%c' % (len(tb), fmt), *tb)
       self.writer(addr, packed_val)
 
     return g, s, ng, ns
@@ -339,9 +349,13 @@ class Memory:
     res = self.reader(addr, size)
     return struct.unpack(self.s2c[size], res)[0]
 
+  # read by size, automatically cast to number
+  def read_n_u(self, addr, size, count):
+    for i in range(count):
+      yield self.read_u(addr+size*i, size)
+
   def write_u(self, v, size):
     x = struct.pack(self.s2c[size], v)
-    print('WRITIGN ', v, x)
     self.reader(x, size)
 
   def read2(self, addr, n):
@@ -366,10 +380,10 @@ class Memory:
   def bzero(self, addr, sz):
     self.write(addr, b'\x00' * sz)
 
-  def get_str(self, addr):
+  def get_str(self, addr, n=0x100):
     s = b''
-    n = 0x100
     while True:
+      print('OOON ', addr, n)
       x = self.read(addr, n)
       for j in range(len(x)):
         if x[j] == 0:
@@ -426,6 +440,19 @@ class BufMem(Memory):
     ptr -= self.base_addr
     self.buf[ptr:ptr + len(content)] = content
 
+class StreamRW(BufMem):
+  def __init__(self, *args, **kwargs):
+    super().__init__(*args, **kwargs)
+    self._pos = 0
+
+  def _read(self, ptr, sz):
+    res = super()._read(ptr+self._pos, sz)
+    self._pos += len(res)
+    return res
+
+  def _write(self, ptr, content):
+    super()._write(ptr+self._pos, content)
+    self._pos += len(content)
 
 class NonRandomMemory(Memory):
 
@@ -522,7 +549,7 @@ def binary_re(*arg):
       if i == b'x':
         cur += b'.{%d}' % num
       else:
-        print(arg, num, pos, arg[pos:pos + num])
+        #print(arg, num, pos, arg[pos:pos + num])
         cur += re.escape(struct.pack('%c%d%c' % (order, num, i), *arg[pos:pos + num]))
         pos += num
       num = None
@@ -562,3 +589,36 @@ class DummyAllocator(SimpleAllocator):
 
   def free_func(self, addr):
     print('KAPPA freeing ', addr)
+
+
+class SegmentedMemory(Memory):
+
+  def __init__(self, mem_segs, **kwargs):
+    super().__init__(reader=self._read, writer=self._write, **kwargs)
+    self.mem_segs = mem_segs
+
+  def _read(self, ptr, sz):
+    res =  self.mem_segs.query_data_do(ptr, lambda obj, pos: obj.read(pos, sz), fail_if_not=1)
+    return res
+
+  def _write(self, ptr, content):
+    return  self.mem_segs.query_data_do(ptr, lambda obj, pos: obj.write(pos, content), fail_if_not=1)
+
+
+
+def snapshot_mem(mem, segs):
+  res = []
+  for seg in segs:
+    content = mem.read(seg.low, seg.n)
+    res.append((seg, content))
+  return cmisc.Attr(data=res, arch=mem.arch.typ)
+
+def seg_mem_from_snapshot(snapshot):
+  from chdrft.emu.binary import arch_data, Arch
+  intervals = Intervals(use_range_data=1, merge=0, is_int=1)
+  arch = arch_data[snapshot.arch]
+  sm = SegmentedMemory(intervals, arch=arch)
+  for seg, content in snapshot.data:
+    intervals.add(seg.low,n=seg.n, data=BufMem(bytearray(content), arch=arch))
+  return sm
+

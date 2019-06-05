@@ -1,3 +1,4 @@
+import numpy as np
 kelly_colors_hex_c1 = [
     0xFFB300,  # Vivid Yellow
     0x803E75,  # Strong Purple
@@ -54,8 +55,8 @@ class ColorConv:
   @staticmethod
   def to_rgb(v):
     if isinstance(v, int):
-      return ((v >> 16) % 256, (v >> 8) % 256, (v >> 0) % 256)
-    return v
+      v= ((v >> 16) % 256, (v >> 8) % 256, (v >> 0) % 256)
+    return np.array(v)
 
   @staticmethod
   def to_hex(v):

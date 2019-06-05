@@ -8,12 +8,14 @@ import traceback as tb
 import hashlib
 import fnmatch
 import pickle
+import glog
 
 global global_cache
 global_cache = None
 global_cache_list = []
 
 global_fileless_cache = None
+
 
 def dump_caches():
   print('DUMP CACHES')
@@ -137,7 +139,8 @@ class FileCacheDB(CacheDB):
         filename=args.cache_file,
         conf=args.cache_conf,
         recompute=args.recompute_all,
-        recompute_set=set(args.recompute))
+        recompute_set=set(args.recompute)
+    )
 
   def __init__(self, filename=None, recompute=False, **kwargs):
     super().__init__(**kwargs)
@@ -147,25 +150,27 @@ class FileCacheDB(CacheDB):
       filename = self.default_cache_filename
     self._cache_filename = filename
 
-
   def write_cache(self, content):
     from chdrft.main import app
     if app.flags and app.flags.disable_cache: return
+    glog.info('Writing cache ')
     with open(self._cache_filename, 'wb') as f:
       if app.flags and app.flags.pickle_cache:
         pickle.dump(content, f)
       else:
         f.write(self._json_util.encode(content).encode())
+    glog.info('Done Writing cache ')
 
   def read_cache(self, f):
     from chdrft.main import app
+    glog.info('Reading cache ')
     if app.flags and app.flags.pickle_cache:
       return pickle.load(f)
     else:
       x = f.read().decode()
       if not x: return {}
       return self._json_util.decode(x)
-
+    glog.info('Done reading cache ')
 
   def do_enter(self):
     if not os.path.exists(self._cache_filename):
@@ -179,7 +184,7 @@ class FileCacheDB(CacheDB):
         if self._recompute:
           cache = {}
         else:
-          cache =self.read_cache(f)
+          cache = self.read_cache(f)
     return cache
 
   def do_exit(self):
@@ -274,7 +279,8 @@ class Cachable:
             from chdrft.main import app
             app.global_context.enter_context(global_fileless_cache)
           cache = global_fileless_cache
-        else: cache = global_cache
+        else:
+          cache = global_cache
         key = Cachable._cachable_get_key_func(f, alt_key)
         return Cachable.proc_cached(cache, key, f, *args, **kwargs)
 
@@ -293,8 +299,7 @@ class Cachable:
         if not hasattr(self, Cachable.ATTR):
 
           if cache_filename:
-            cache = FileCacheDB(
-                cache_filename)
+            cache = FileCacheDB(cache_filename)
           else:
             cache = FilelessCacheDB()
 
@@ -330,7 +335,8 @@ def print_cache(args):
 def cache_argparse(parser):
   parser.add_argument('--cache-conf', type=str, default=cmisc.cwdpath(CacheDB.default_conf))
   parser.add_argument(
-      '--cache-file', type=cmisc.cwdpath, default=cmisc.cwdpath(CacheDB.default_cache_filename))
+      '--cache-file', type=cmisc.cwdpath, default=cmisc.cwdpath(CacheDB.default_cache_filename)
+  )
   parser.add_argument('--recompute-all', action='store_true')
   parser.add_argument('--recompute', type=lambda x: x.split(','), default=[])
   parser.add_argument('--disable-cache', action='store_true')

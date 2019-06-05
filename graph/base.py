@@ -1,4 +1,49 @@
 from collections import defaultdict
+import chdrft.utils.misc as cmisc
+
+
+class UnionJoinLax:
+
+  def __init__(self):
+    self.par = defaultdict(lambda: -1)
+    self.data = cmisc.Attr(handler=lambda u: (cmisc.Attr(handler=lambda x: (x,1)),1))
+
+  def root(self, a):
+    if self.par[a] == -1:
+      return a
+    self.par[a] = self.root(self.par[a])
+    return self.par[a]
+
+  def groups(self):
+    res = defaultdict(set)
+    for k in self.par.keys():
+      res[self.root(k)].add(k)
+    return list(res.values())
+
+  def join_multiple(self, lst, update_dict):
+    objs = {}
+    for k, v in update_dict.items():
+      objs[k] = self.data[k][self.root(v)]
+    r = None
+    for u in lst[1:]:
+      r = self.join(lst[0], u)
+
+    for k, v in objs.items():
+      self.data[k][r] = v
+
+
+  def join(self, a, b, update_dict=None):
+    b = self.root(b)
+    a = self.root(a)
+    if a==b: return a
+    # a is new root
+
+    if update_dict is not None:
+      for k, v in update_dict.items():
+        self.data[k][a] = self.data[k][self.root(v)]
+    assert a != b
+    self.par[b] = a
+    return a
 
 class OpaGraph:
 

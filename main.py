@@ -16,6 +16,7 @@ class App:
   def __init__(self):
     self.flags = None
     self.stack = None
+    self.override_flags = {}
     if not is_python2:
       self.global_context = ExitStack()
 
@@ -51,6 +52,8 @@ class App:
       if flags.other_args and flags.other_args[0] == '--':
         flags.other_args = flags.other_args[1:]
       self.flags = flags
+      for k, v in self.override_flags.items():
+        setattr(self.flags, k, v)
 
       glog.setLevel(flags.verbosity)
       if flags.log_file:
@@ -75,7 +78,7 @@ class App:
 
           plog_file = open(plog_filename, 'w')
           stack.enter_context(plog_file)
-          flags.plog_file = plog_file
+          self.plog_file = plog_file
 
           if cache:
             stack.enter_context(cache)

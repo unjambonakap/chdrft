@@ -19,10 +19,10 @@ def args(parser):
 
 
 class BufferParser(NonRandomMemory):
-  def __init__(self, data):
+  def __init__(self, data, *args, **kwargs):
     self.data = data
     self.pos = 0
-    super().__init__(reader=lambda addr, size: self._read(size))
+    super().__init__(reader=lambda addr, size: self._read(size), *args, **kwargs)
 
   def _read(self, size):
     res = self.data[self.pos:self.pos+size]

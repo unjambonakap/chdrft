@@ -1,9 +1,6 @@
-import os
+from chdrft.display.base import QtWidgets, QtCore
 import sys
-os.environ['PYQTGRAPH_QT_LIB']='PyQt5'
-from pyqtgraph.Qt import QtGui, QtCore, USE_PYSIDE, USE_PYQT5
 import numpy as np
-from PyQt5 import QtCore
 import pyqtgraph as pg
 import pyqtgraph.ptime as ptime
 import scipy.ndimage as ndimage
@@ -22,6 +19,24 @@ from chdrft.struct.base import Range2D, Intervals
 
 from ipykernel.kernelapp import IPKernelApp
 from IPython.utils.frame import extract_module_locals
+
+from chdrft.cmds import CmdsList
+from chdrft.main import app
+from chdrft.utils.cmdify import ActionHandler
+from chdrft.utils.misc import Attributize
+import chdrft.utils.misc as cmisc
+import glog
+
+
+global flags, cache
+flags = None
+cache = None
+
+
+def args(parser):
+  clist = CmdsList()
+  ActionHandler.Prepare(parser, clist.lst, global_action=1)
+
 
 
 class EventHelper:
@@ -47,7 +62,7 @@ class EventHelper:
 
   @staticmethod
   def FromModifiers():
-    return QtWidget.QApplciation.keyboardModifiers()
+    return QtWidget.QApplication.keyboardModifiers()
 
   def pos(self):
     return self._pos
@@ -331,6 +346,24 @@ class Sampler:
       fig.add_plot(PlotEntry(nd))
 
 
+class ImageEntry:
+
+  def __init__(self, data, **kwargs):
+    self.data = data
+    self.kwargs = kwargs
+    self.obj = None
+    self.plot_widget = None
+
+  def register(self, plot_widget):
+    self.plot_widget = plot_widget
+    self.obj = pg.ImageItem(self.data.y)
+    self.plot_widget.viewbox.addItem(self.obj)
+    self.obj.setRect(self.data.range2d.to_qrectf())
+
+  def unregister(self):
+    assert 0
+
+
 class PlotEntry:
 
   def __init__(self, data, **kwargs):
@@ -555,6 +588,7 @@ class ActionManager:
     return False
 
   def mouse_mov(self, h):
+    #print('mouse mov', h.pos())
     if self.drag_curve.is_active():
       if self.drag_curve.drag:
         self.drag_curve.notify_mov(h.pos())
@@ -564,7 +598,7 @@ class ActionManager:
 
 class OpaPlot(pg.PlotWidget):
 
-  def __init__(self, plots=[], *args, **kwargs):
+  def __init__(self, plots=[], images=[], *args, **kwargs):
     super().__init__(*args, viewBox=ViewBox2(), **kwargs)
     self.manager = None
     self.menu = PlotMenu(self)
@@ -583,6 +617,9 @@ class OpaPlot(pg.PlotWidget):
     self.opa_plots = QContainer()
     for plot in to_list(plots):
       self.add_plot(plot)
+
+    for image in to_list(images):
+      self.add_image(image)
 
     self.used_color = None
 
@@ -607,9 +644,12 @@ class OpaPlot(pg.PlotWidget):
     self.names.add(name)
     return name
 
-  def add_plot(self, plot_entry):
+  def add_plot(self, plot_entry, **kwargs):
+    if isinstance(plot_entry, (tuple, list, np.ndarray)):
+      plot_entry = DataSet(plot_entry)
+
     if isinstance(plot_entry, DataSet):
-      plot_entry = PlotEntry(plot_entry)
+      plot_entry = PlotEntry(plot_entry, **kwargs)
     glog.info('Adding plot with name=%s', plot_entry.data.name)
 
     if plot_entry.data.name in self.names:
@@ -617,15 +657,24 @@ class OpaPlot(pg.PlotWidget):
 
     if not 'pen' in plot_entry.kwargs:
       plot_entry.kwargs['pen'] = {}
-    if not 'color' in plot_entry.kwargs['pen']:
+    pen = plot_entry.kwargs['pen']
+    if pen is not None and 'color' not in pen:
       if 'color' in plot_entry.kwargs:
         color = Color(plot_entry.kwargs['color']).RGB
       else: color = self.get_color()
-      plot_entry.kwargs['pen']['color'] = color
+      pen['color'] = color
 
     self.opa_plots.append(plot_entry)
     plot_entry.register(self)
     return plot_entry
+
+  def add_image(self, image_entry):
+    if isinstance(image_entry, Dataset2D):
+      image_entry = ImageEntry(image_entry)
+    glog.info('Adding image ')
+
+    image_entry.register(self)
+    return image_entry
 
   def save_figure(self):
     path, ok = QtGui.QInputDialog.getText(self, 'Path', 'path')
@@ -780,12 +829,13 @@ class OpaMainWindow(MainWindow):
 
 class GraphHelper:
 
-  def __init__(self, create_kernel=False):
+  def __init__(self, create_kernel=False, run_in_jupyter=0):
 
+    self.run_in_jupyter = run_in_jupyter
     self.app = QtCore.QCoreApplication.instance()
     if self.app is None:
-      self.app = QtGui.QApplication([])
-    self.app.setQuitOnLastWindowClosed(False)
+      self.app = QtWidgets.QApplication([])
+    self.app.setQuitOnLastWindowClosed(True)
     self.app.aboutToQuit.connect(self.about_to_quit)
     #QtCore.QObject.connect(self.app, Qt.SIGNAL("lastWindowClosed()"),
     #                  self.app, Qt.SLOT("quit()"))
@@ -802,8 +852,8 @@ class GraphHelper:
 
     #ui.graphicsView.useOpenGL()  ## buggy, but you can try it if you need extra speed.
 
-    self.vb = ViewBox2()
-    self.vb.setAspectLocked()
+    #self.vb = ViewBox2()
+    #self.vb.setAspectLocked()
     self.manager = PlotManager(self.win, self.win.ui.verticalLayout)
 
   def close_main_window(self):
@@ -816,14 +866,20 @@ class GraphHelper:
   def about_to_quit(self):
     print('about to quit kappa')
 
-  def create_plot(self, *args):
-    plot = self.manager.create_plot(OpaPlot, *args)
+  def create_plot(self, *args, **kwargs):
+    plot = self.manager.create_plot(OpaPlot, *args, **kwargs)
     return plot
 
   def remove_plot(self, plot):
     self.manager.remove_plot(plot)
 
   def run(self):
+
+    if self.run_in_jupyter:
+      from IPython.lib.guisupport import start_event_loop_qt4
+      start_event_loop_qt4(app)
+      return
+
     #if (sys.flags.interactive != 1) or not hasattr(QtCore, 'PYQT_VERSION'):
     if not is_interactive():
       if self.ipkernel is not None:
@@ -832,3 +888,16 @@ class GraphHelper:
         self.ipkernel.start()
       else:
         QtGui.QApplication.instance().exec_()
+
+def test1(ctx):
+  g = GraphHelper()
+  p1 = DataSet(y=-np.array(range(10)))
+  g.create_plot(plots=[p1])
+  g.run()
+
+def main():
+  ctx = Attributize()
+  ActionHandler.Run(ctx)
+
+
+app()

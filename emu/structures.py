@@ -31,7 +31,7 @@ class Data:
     self.arch = None
 
   def set_m32(self, m32):
-    print('SETTING m32', m32)
+    glog.debug('SETTING m32 %s'%m32)
     self.is_m32 = m32
     set_cur_types_helper(m32)
     self.types_helper = None
@@ -266,26 +266,26 @@ class StructBuilder:
     args.extend(extra_args)
     code_content = '\n'.join(self.content)
     assert len(self.content) > 0
-    glog.info('Extracting >> %s', code_content)
+    glog.debug('Extracting >> %s', code_content)
     self.res = OpaIndex.create_index(
         file_content=code_content, cpp_mode=cpp_mode, args=args, filter=self.filter)
     for macro in self.res.macros:
       self.consts[macro.name] = macro.val
 
     for typedef in self.res.typedefs:
-      glog.info('GOT TYP %s', typedef.name)
+      glog.debug('GOT TYP %s', typedef.name)
       self.typs[typedef.name] = typedef.typedef_typ
 
     for struct in self.res.structs:
-      glog.info('GOT struct %s', struct.name)
+      glog.debug('GOT struct %s', struct.name)
       self.typs[struct.name] = struct
 
     for fname, function in self.res.functions.items():
-      glog.info('GOT function %s', function.name)
+      glog.debug('GOT function %s', function.name)
       self.functions[fname] = function
 
     for var in self.res.vars:
-      glog.info('GOT var %s', var.name)
+      glog.debug('GOT var %s', var.name)
       self.vars[var.name] = var
 
     for extractor in self.extractors:
@@ -393,13 +393,13 @@ class Structure(Attributize):
       res = self._typ.choices.find_choice(name[4:])
       if res is not None:
         self.set(res)
-        return (True,)
-      glog.info('cannot find here name=%s, res=%s, choices=%s', name, res, self._typ.choices)
+        return (True, 0)
+      glog.debug('cannot find here name=%s, res=%s, choices=%s', name, res, self._typ.choices)
     if name.startswith('is_'):
       res = self._typ.choices.find_choice(name[3:])
       if res is not None:
-        return (self.get(choice=False) == res,)
-      glog.info('cannot find here name=%s, res=%s', name, res)
+        return (self.get(choice=False) == res, 0)
+      glog.debug('cannot find here name=%s, res=%s', name, res)
 
   def __getitem__(self, name):
     if self.is_array:
@@ -538,7 +538,7 @@ class Structure(Attributize):
 
     if self.is_primitive:
       val = self._get(self._typ.typ_data)
-      #glog.info('Req get %s: %s %s', val, self.offset, self.bitsize)
+      #glog.debug('Req get %s: %s %s', val, self.offset, self.bitsize)
       if not choice: return val
       return self._typ.choices.choice_str(val)
     elif self.is_pointer:
@@ -547,7 +547,7 @@ class Structure(Attributize):
       return self._get_raw()
 
   def set(self, value, choice=True, accessor_pos=0):
-    #glog.info('Req set %s: %s %s', value, self.offset, self.bitsize)
+    #glog.debug('Req set %s: %s %s', value, self.offset, self.bitsize)
     if accessor_pos is not None and accessor_pos < len(self._accessors) and choice:
       return self._accessors[accessor_pos].set(value)
 
@@ -1163,13 +1163,14 @@ class YamlStructBuilder:
     return res
 
 
-g_data.set_m32(False)
-CORE_TYPES = YamlStructBuilder()
-arch_data[Arch.x86_64].typs = CORE_TYPES.typs
-g_data.set_m32(True)
-CORE_TYPES_U32 = YamlStructBuilder()
-arch_data[Arch.x86].typs = CORE_TYPES.typs
-g_data.set_m32(None)
+if arch_data is not None:
+  g_data.set_m32(False)
+  CORE_TYPES = YamlStructBuilder()
+  arch_data[Arch.x86_64].typs = CORE_TYPES.typs
+  g_data.set_m32(True)
+  CORE_TYPES_U32 = YamlStructBuilder()
+  arch_data[Arch.x86].typs = CORE_TYPES.typs
+  g_data.set_m32(None)
 
 ##obsolete I believe
 #class StructureReader:

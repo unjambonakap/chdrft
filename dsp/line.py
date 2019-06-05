@@ -163,7 +163,7 @@ class PlotDb:
                      name=basename,)
 
         if plot_conf.apply:
-          apply_list=to_list(plot_conf.apply, sep='/')
+          apply_list=to_list(plot_conf.apply, sep='#')
           for entry in apply_list:
             ny=eval(entry, globals(), dict(x=x, y=y, ds=ds))
             ds_name = '%s_%s'%(basename, entry)

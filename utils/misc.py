@@ -19,7 +19,8 @@ import csv
 import fnmatch
 import glob
 import numpy as np
-
+import copy
+import functools
 
 
 def to_str(x):
@@ -309,7 +310,7 @@ def path_here(*path):
   frame = inspect.currentframe().f_back
   while not '__file__' in frame.f_globals:
     frame = frame.f_back
-  return proc_path(os.path.join(os.path.split(frame.f_globals['__file__'])[0], *path))
+  return proc_path(os.path.join(os.path.split(os.path.realpath(frame.f_globals['__file__']))[0], *path))
 
 
 def path_from_script(script, *path):
@@ -413,6 +414,7 @@ class Attributize(dict):
       key_norm=None,
       affect_elem=True,
       repr_blacklist_keys=[],
+      *args,
       **rem
   ):
     if elem is None:
@@ -425,7 +427,7 @@ class Attributize(dict):
     super().__setattr__('_key_norm', key_norm)
     super().__setattr__('_elem', elem)
     super().__setattr__('_other', other)
-    super().__setattr__('_handler', handler)
+    super().__setattr__('_handler', handler) # returns None or tuple(object, should_insert)
     super().__setattr__('_affect_elem', affect_elem)
     super().__setattr__('_repr_blacklist_keys', list(repr_blacklist_keys))
 
@@ -442,6 +444,9 @@ class Attributize(dict):
     if key in self:
       return self[key]
     return default
+
+  def get_or_insert(self, key, default):
+    return DictUtil.get_or_insert(self, key, default)
 
   def keys(self):
     return self._elem.keys()
@@ -483,6 +488,8 @@ class Attributize(dict):
       if self._handler:
         res = self._handler(name)
         if res is not None:
+          if res[1]:
+            self._elem[name] = res[0]
           return res[0]
       raise AttributeError('Shit attribute %s' % name)
 
@@ -499,6 +506,8 @@ class Attributize(dict):
       if self._handler:
         res = self._handler(name)
         if res is not None:
+          if res[1]:
+            self._elem[name] = res[0]
           return res[0]
       raise KeyError('Shit key %s' % name)
 
@@ -613,15 +622,17 @@ if sys.version_info >= (3, 0):
 
 class PatternMatcher:
 
-  def __init__(self, check_method, start_method=None):
-    self.check_method = check_method
+  def __init__(self, check_method, start_method=None, get_method=None):
+    self.check = check_method
     self.start = start_method
+    self.get= get_method
+    self.result = None
 
   def check(self, data):
-    return self.check_method(data)
+    return self.check(data)
 
   def __call__(self, data):
-    return self.check_method(data)
+    return self.check(data)
 
   @staticmethod
   def Before(pattern, data):
@@ -674,19 +685,28 @@ class PatternMatcher:
   def fromre(reg):
     r = re.compile(reg)
 
+    pm =  PatternMatcher(None)
+    def get(data):
+      return r.search(data)
+
     def checker(data):
-      x = r.search(data)
+      x = get(data)
       if x is None:
         return None
+      pm.result = x
       return x.end()
 
     def start(data):
-      x = r.search(data)
+      x = get(data)
       if x is None:
         return None
       return x.start()
 
-    return PatternMatcher(checker, start)
+    pm.get = get
+    pm.check = checker
+    pm.start = start
+    return pm
+
 
   @staticmethod
   def fromstr(reg):
@@ -831,6 +851,12 @@ class Timespan:
   def tot_sec(self):
     return self.tot_usec() / 1000000
 
+
+def failsafe_or(action, alt=None):
+  try:
+    return action()
+  except:
+    return alt
 
 def failsafe(action):
   try:
@@ -1138,6 +1164,7 @@ if sys.version_info >= (3, 0):
     x86_64 = 'x86_64'
     mips = 'mips'
     arm = 'arm'
+    arm64 = 'arm64'
     thumb = 'thumb'
 
   class CsvWriterStream(ExitStack):
@@ -1220,6 +1247,47 @@ class FormatPrinter(pp.PrettyPrinter):
       return self.formats[type(obj)] % obj, 1, 0
     return super().format(obj, ctx, maxlvl, lvl)
 
+
+class TempOverride(ExitStack):
+  def __init__(self):
+    super().__init__()
+    self.data = []
+    self.to_remove = []
+
+
+  def cleanup(self):
+    for obj, name in self.to_remove:
+      delattr(obj, name)
+    for obj, name, old_v in self.data:
+      setattr(obj, name, old_v)
+
+
+  def __enter__(self):
+    super().__enter__()
+    self.callback(self.cleanup)
+    return self
+
+  def override_attr(self, obj, name, v):
+    if hasattr(obj, name):
+      self.data.append((obj, name, getattr(obj, name)))
+    else:
+      self.to_remove.append((obj, name))
+    setattr(obj, name, v)
+
+def safe_select(a, x, default=None):
+  if len(a) <= x: return default
+  return a[x]
+
+def is_array_constant(x):
+  for i in range(1, len(x)):
+    if x[i] != x[0]: return 0
+  return 1
+
+def yield_wrapper(f):
+  @functools.wraps(f)
+  def wrapper(*args, **kwargs):
+    return list(f(*args, **kwargs))
+  return wrapper
 
 ppx = FormatPrinter({float: '%.4f', np.float64: "%.4f", int: "%06X"}, compact=1, width=200)
 

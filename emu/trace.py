@@ -20,7 +20,12 @@ def args(parser):
 def fmt_num(v, n=None):
   if n is None:
     n = 8
-  return ('{:0%dx}' % (2 * n)).format(v)
+  while True:
+    cur =  ('{:0%dx}' % (2 * n)).format(v)
+    if len(cur)>2*n:
+      n*=2
+    else:
+      return cur
 
 
 class Display:
@@ -43,8 +48,8 @@ class Display:
 
   @staticmethod
   def mem_summary(mem, start, n, word_size=4, istart=None, minv=None, maxv=None):
-    if minv is None: minv = mem.minv
-    if maxv is None: maxv = mem.maxv
+    if minv is None: minv = getattr(mem, 'minv', 0)
+    if maxv is None: maxv = getattr(mem, 'maxv', 0)
     s = ''
     if istart is None:
       istart = 0
@@ -68,7 +73,7 @@ class Display:
     return s
 
   @staticmethod
-  def disp(a, name='', **kwargs):
+  def disp(a, name='', n_per_lines=1000,**kwargs):
     params = Display.update_params(**kwargs)
     s = ''
     if a is None:
@@ -80,9 +85,14 @@ class Display:
     elif isinstance(a, dict):
       keys = list(a.keys())
       keys.sort()
-      s = Display.disp_list2([[k, a[k]] for k in keys], params=params)
+      s = []
+      for i in range(0, len(keys), n_per_lines):
+        s.append(Display.disp_list2([[k, a[k]] for k in keys[i:i+n_per_lines]], params=params))
+      s = '\n'.join(s)
     elif isinstance(a, str):
       s = a
+    elif isinstance(a, bytes):
+      s = str(a)
     else:
       assert 0, type(a)
 
@@ -129,6 +139,7 @@ class Display:
     if len(s2_rem) > 0:
       s2 += '\t###\t' + s2_rem
 
+    if not s1 and not s2: return ''
     return Display.disp_2str(s1, s2, name)
 
   @staticmethod
@@ -208,7 +219,7 @@ def dict_diff(a, b):
 
 class TraceEvent:
 
-  def __init__(self, arch, regs, ins, addr, short_mode=False, diff_mode=True):
+  def __init__(self, arch, regs, ins, addr, short_mode=False, diff_mode=True, info=''):
     self.short_mode = short_mode
     self.arch = arch
     self.mc = arch.mc
@@ -222,6 +233,7 @@ class TraceEvent:
     self.old_stacks = None
     self.diff_mode= diff_mode
     self.base_regs =regs
+    self.info = info
 
     self.i_regs = self.extract_regs(regs)
     self.o_regs = None
@@ -249,6 +261,7 @@ class TraceEvent:
     regs_data = {}
     ops = self.mc.get_reg_ops(self.mc.get_one_ins(self.raw_ins))
     if ops is None: return None
+    if not 'reg_rel' in self.arch: return None
     for reg in ops:
       reg_size = self.arch.reg_rel.get_size(reg)
       res_reg = self.arch.reg_rel.find(reg, self.i_regs)
@@ -259,7 +272,7 @@ class TraceEvent:
 
   def __str__(self):
     data = []
-    data.append('{} \t\t <<<< TRACEVENT'.format(self.desc))
+    data.append(f'{self.desc} ({self.info})\t\t <<<< TRACEVENT')
     tmp = self.get_opreg_str()
     if tmp: data.append(tmp)
     data.append(Display.disp(self.read_event, name='ReadEvent'))
@@ -293,6 +306,7 @@ class VmOp:
     self.typ = typ
     self.reads = []
     self.writes = []
+    self.header = ''
 
     self.window = 0x100
 
@@ -323,6 +337,7 @@ class VmOp:
     wevents = self.aggregate_rw(self.writes)
 
     data = []
+    if self.header: data.append(self.header)
     data.append('VMOP at {} of typ {}, id={}'.format(
         Display.disp(self.regs.ins_pointer), self.typ, self.pos))
     for k in self.start_data.sorted_keys():
@@ -349,7 +364,7 @@ class VmOp:
     data.append('ReadEvents: ' + Display.disp_list2(revents))
     data.append('WriteEvents: ' + Display.disp_list2(wevents))
     if regs:
-      rs = Display.regs_summary(self.regs, self.arch.regs)
+      rs = Display.regs_summary(self.regs, self.regs)
       data.append('FullRegs:\n' + rs)
       for k in self.end_data.sorted_keys():
         data.append(
@@ -430,7 +445,7 @@ class WatchedRegs:
     self.diff_params = Attributize(default_none=True, watcher=self, name=self.name, num_size=8)
 
   def summary(self):
-    return Display.regs_summary(self.regs, self.lst)
+    return Display.regs_summary(self.lst, self.regs)
 
   def is_in(self, addr):
     return False
@@ -461,18 +476,23 @@ class Tracer:
     self.count += 1
     return VmOp(self.arch, self.watched, typ, self.count, self.regs)
 
-  def start_vm_op(self):
+  def start_vm_op(self, header=''):
+    self.maybe_close_op()
     self.vm_op = self.get_vm_op('normal')
+    self.vm_op.header = header
     self.vm_op.start()
 
     if self.load_op:
       self.load_op.end()
-      #self.send_event(self.load_op)
+      self.send_event(self.load_op)
 
   def end_vm_op(self):
     self.load_op = self.get_vm_op('load')
     self.load_op.start()
 
+    self.maybe_close_op()
+
+  def maybe_close_op(self):
     if self.vm_op:
       self.vm_op.end()
       self.send_event(self.vm_op)
@@ -482,13 +502,13 @@ class Tracer:
       if self.filter is None or self.filter(e):
         self.cb(e)
 
-  def notify_ins(self, addr, size, short_mode=False):
+  def notify_ins(self, addr, size, short_mode=False, info=''):
     if self.cur is not None:
       self.cur.setup_new_regs(self.regs)
       self.send_event(self.cur)
 
     ins = self.mem.read(addr, size)
-    self.cur = TraceEvent(self.arch, self.regs, ins, addr, short_mode, diff_mode=self.diff_mode)
+    self.cur = TraceEvent(self.arch, self.regs, ins, addr, short_mode, diff_mode=self.diff_mode, info=info)
 
   def check_access(self, addr):
     if self.ignore_unwatched: return
