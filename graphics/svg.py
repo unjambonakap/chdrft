@@ -7,7 +7,7 @@ from chdrft.utils.misc import Attributize
 import shutil
 import svgpathtools
 from svgpathtools import *
-from chdrft.struct.base import Box, mat_translate
+from chdrft.struct.base import Box
 import numpy as np
 import math
 from vispy.color import Color

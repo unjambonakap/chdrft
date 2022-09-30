@@ -1,11 +1,12 @@
 import glog
-from chdrft.utils.misc import struct_helper, to_int, BitOps, to_bytes, flatten
+from chdrft.utils.misc import struct_helper, to_int, BitOps, to_bytes, flatten, yaml_load_custom, yaml_dump_custom
 import chdrft.utils.misc as cmisc
 import json
 import pandas
 import yaml
 from asq.initiators import query
-from chdrft.utils.arg_gram import LazyConf
+import pickle
+import io
 
 def bit2num(tb):
   res = 0
@@ -33,27 +34,49 @@ class Format(object):
     return self
 
   def from_conf(self):
+    from chdrft.utils.arg_gram import LazyConf
     self.v = LazyConf.ParseFromString(self.v)
     return self
 
+  def to_strio(self):
+    self.v = io.StringIO(self.v)
+    return self
+
+  def to_pickle(self):
+    self.v = pickle.dumps(self.v)
+    return self
+
+  def from_pickle(self):
+    self.v = pickle.loads(self.v)
+    return self
+
   def from_yaml(self):
-    self.v = yaml.load(self.v)
+    self.v = yaml_load_custom(self.v)
     return self
 
   def to_yaml(self):
-    self.v = yaml.dump(self.v)
+    self.v = yaml_dump_custom(self.v)
     return self
 
   def to_attr(self):
-    self.v = cmisc.Attributize(self.v)
+    self.v = cmisc.Attributize.RecursiveImport(self.v)
     return self
 
   def from_json(self):
-    self.v = json.loads(self.v)
+    self.v = cmisc.Attr.RecursiveImport(cmisc.json_loads(self.v))
+    return self
+
+  def from_csv(self, **kwargs):
+    self.v = pandas.read_csv(self.v, **kwargs)
+    return self
+
+  def pretty(self, **kwargs):
+    from chdrft.emu.trace import Display
+    self.v = Display.disp(self.v, **kwargs)
     return self
 
   def to_json(self):
-    self.v = json.dumps(self.v)
+    self.v = cmisc.json_dumps(self.v)
     return self
 
   def to_csv(self, **kwargs):
@@ -71,6 +94,10 @@ class Format(object):
     return self
 
   def tobytes(self):
+    self.v = to_bytes(self.v)
+
+    return self
+  def to_bytes(self):
     self.v = to_bytes(self.v)
     return self
 
@@ -162,8 +189,16 @@ class Format(object):
           else:
             res.append(v >> (7-j) & 1)
     else:
-      for j in range(size):
-        res.append(self.v >> j & 1)
+      if size is None:
+        size = 0
+        while self.v > 0:
+          res.append(self.v &1)
+          self.v >>= 1
+          size += 1
+
+      else:
+        for j in range(size):
+          res.append(self.v >> j & 1)
       if not bitorder_le:
         res=res[::-1]
 
@@ -253,7 +288,7 @@ class Format(object):
     if n < 0:
       return self.shiftl(-n)
     prev = 0
-    for i in range(len(self.v)):
+    for i in reversed(range(len(self.v))):
       x = self.v[i] >> n
       # may have broken shit here, see diff history
       x |= (prev << n2 ) & 0xff
@@ -267,8 +302,7 @@ class Format(object):
     assert n < 8
     n2 = 8 - n
     prev=0
-    for ix in range(len(self.v)):
-      i = len(self.v) - 1 - ix
+    for i in range(len(self.v)):
       x = (self.v[i] << n) & 0xff
       x |= (prev >> n2)
       prev = self.v[i]

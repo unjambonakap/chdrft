@@ -2,48 +2,102 @@ from collections import defaultdict
 import chdrft.utils.misc as cmisc
 
 
+def lambda_minus1():
+  return -1
+
+
+def data_handler(u):
+  return cmisc.Attr(handler=lambda x: (x, 1)), 1
+
+
 class UnionJoinLax:
 
-  def __init__(self):
-    self.par = defaultdict(lambda: -1)
-    self.data = cmisc.Attr(handler=lambda u: (cmisc.Attr(handler=lambda x: (x,1)),1))
+  def __init__(self, key=None, pairs=[], nodes=[]):
+    self.rmp = cmisc.Remap.Numpy(key=key)
+    self.par = defaultdict(lambda_minus1)
+    self.data = cmisc.Attr(handler=data_handler)
+    self._gid = cmisc.Remap()
+    self._res = None
+    for x in pairs: self.join(*x)
+    for x in nodes: self.consider(x)
+
+  def remap(self, a):
+    return self.rmp.get(a)
+
+  def consider(self, a):
+    self.root(a)
 
   def root(self, a):
+    return self.rmp.rget(self._root(self.remap(a)))
+
+  def is_repr(self, a):
+    return self.root(a) == a
+
+  def _root(self, a):
     if self.par[a] == -1:
       return a
-    self.par[a] = self.root(self.par[a])
+    self.par[a] = self._root(self.par[a])
     return self.par[a]
 
-  def groups(self):
-    res = defaultdict(set)
-    for k in self.par.keys():
-      res[self.root(k)].add(k)
-    return list(res.values())
+  def compute_res(self):
+    if self._res is None:
+      self._res = defaultdict(list)
+      for k in self.par.keys():
+        self._res[self._root(k)].append(self.rmp.rget(k))
+      for k in self._res.keys(): self._gid.get(k)
 
-  def join_multiple(self, lst, update_dict):
+    return self._res
+
+  @property
+  def res(self): return self.compute_res()
+  @property
+  def reprs(self): return [self.rmp.rget(x) for x in self.res.keys()]
+
+  def gid(self, a):
+    self.compute_res()
+    return self._gid.get(self._root(self.rmp.get(a)), assert_in=1)
+
+  def group(self, a):
+    return self.res[self._root(self.remap(a))]
+
+  def groups(self):
+    return list(self.res.values())
+
+  def join_multiple(self, lst, update_dict=None):
     objs = {}
-    for k, v in update_dict.items():
-      objs[k] = self.data[k][self.root(v)]
+
+    if update_dict is not None:
+      for k, v in update_dict.items():
+        objs[k] = self.data[k][self.root(v)]
+
     r = None
     for u in lst[1:]:
       r = self.join(lst[0], u)
 
-    for k, v in objs.items():
-      self.data[k][r] = v
+    if update_dict is not None:
+      for k, v in objs.items():
+        self.data[k][r] = v
+    return r
 
+  def join(self, a, b, **kwargs):
+    return self.make_par_child(a, b, lax=1)
 
-  def join(self, a, b, update_dict=None):
-    b = self.root(b)
-    a = self.root(a)
-    if a==b: return a
+  def make_par_child(self, a, b, update_dict=None, norm=1, lax=0):
+    if norm:
+      a = self._root(self.remap(a))
+      b = self._root(self.remap(b))
+
+    if not lax: assert a != b
+    if a == b: return self.rmp.rget(a)
     # a is new root
 
     if update_dict is not None:
       for k, v in update_dict.items():
-        self.data[k][a] = self.data[k][self.root(v)]
+        self.data[k][a] = self.data[k][self._root(v)]
     assert a != b
     self.par[b] = a
-    return a
+    return self.rmp.rget(a)
+
 
 class OpaGraph:
 
@@ -65,11 +119,10 @@ class OpaGraph:
         res[self.root(i)].append(i)
       return list(res.values())
 
-
     def join(self, a, b):
       b = self.root(b)
       a = self.root(a)
-      if a==b: return
+      if a == b: return
       assert a != b
       self.par[b] = a
 
@@ -95,7 +148,7 @@ class OpaGraph:
 
   class Node:
 
-    def __init__(self, data):
+    def __init__(self, data=None):
       self.parent = None
       self.children = []
       self.e_list = []

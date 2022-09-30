@@ -68,6 +68,7 @@ def args(parser):
 
     Cmds.add(func=fcf_to_csv, args=[cwdpath])
     Cmds.add(func=fcf_to_array, args=[cwdpath])
+    import chdrft.conv.utils
 
 
     import chdrft.graphics.loader as graphics_loader

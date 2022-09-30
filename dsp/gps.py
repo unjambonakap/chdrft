@@ -10,6 +10,7 @@ import chdrft.utils.Z as Z
 import chdrft.utils.K as K
 import numpy as np
 from chdrft.dsp.base import SignalBuilder, PulsedSignalBuilder, OpaXpsk
+import chdrft.dsp.base as opa_dsp_base
 
 global flags, cache
 flags = None
@@ -27,6 +28,7 @@ kGPS_SAMPLES_PER_PRN = kGPS_CHIPS_PER_PRN * kGPS_SAMPLES_PER_CHIP
 kGPS_GCODE_FREQ = 50
 kGPS_FILTER_MATCH_N_TILE = 20
 kGPS_NUM_PRN_PERIOD_PER_GBIT = kGPS_PRN_FREQ // kGPS_GCODE_FREQ
+kGPS_CENTER_FREQ = 1575420000
 
 kBINARY_SD = 1  # standard deviation 1 for of {-1, 1}, equiprobable
 kSIGNAL_POWER_NOSAT_TRACK = Z.stats.norm.ppf(
@@ -40,6 +42,7 @@ def args(parser):
   clist = CmdsList().add(test)
   parser.add_argument('--outfile')
   parser.add_argument('--infile')
+  parser.add_argument('--nsyms', type=int)
   ActionHandler.Prepare(parser, clist.lst, global_action=1)
 
 
@@ -56,20 +59,22 @@ def get_l1ca(sid):
     lst.append(b.get_l1(i))
   return np.array(lst)
 
+
 def get_l1ca_pulse(sid, samples_per_chip):
   return np.repeat(get_l1ca(sid), samples_per_chip) * 2 - 1
+
 
 class OpaGpsSatellite:
 
   def __init__(self, sid, sats=None, conf=None):
     if conf is None:
-      conf = cmisc.Attr(samples_per_chip = kGPS_SAMPLES_PER_CHIP,
-                        samples_freq = kGPS_SAMPLE_FREQ,
-                        match_n_tile = kGPS_FILTER_MATCH_N_TILE,
-                        prn_freq = kGPS_PRN_FREQ,
-                        )
+      conf = cmisc.Attr(
+          samples_per_chip=kGPS_SAMPLES_PER_CHIP,
+          samples_freq=kGPS_SAMPLE_FREQ,
+          match_n_tile=kGPS_FILTER_MATCH_N_TILE,
+          prn_freq=kGPS_PRN_FREQ,
+      )
     self.conf = conf
-
 
     self.seq_track = get_l1ca_pulse(sid, self.conf.sample_per_chip)
     self.seq_acq = np.tile(self.seq_track, self.conf.match_n_tile)
@@ -195,12 +200,16 @@ class OpaGpsSatellite:
 
     max_doppler_rate_hz_per_sec = 2000
     max_doppler_shift = max_doppler_rate_hz_per_sec / self.conf.prn_freq
-    doppler_space = np.linspace(-max_doppler_shift, max_doppler_shift, 10) + self.tracking_data.doppler
+    doppler_space = np.linspace(
+        -max_doppler_shift, max_doppler_shift, 10
+    ) + self.tracking_data.doppler
 
     power, freq, phase, ipower = self.analyse_chip_doppler_space(cur, doppler_space, acq=0)
     self.tracking_data.doppler = freq
     self.tracking_data.chip_phase = chip_start + phase
-    self.stats.append(dict(type='track', power=power, freq=freq, phase=phase + chip_start, ipower=ipower))
+    self.stats.append(
+        dict(type='track', power=power, freq=freq, phase=phase + chip_start, ipower=ipower)
+    )
 
     self.tracking_data.bits.append(ipower)
     print('Track: ', power, kSIGNAL_POWER_NOSAT_TRACK)
@@ -212,6 +221,7 @@ class OpaGpsSatellite:
     if self.tracking_data:
       bits = np.array(self.tracking_data.bits)
       self.tracking_data.processed_bits = np.abs(np.diff(np.unwrap(np.angle(bits))))
+
 
 class OpaGps:
 
@@ -250,10 +260,9 @@ class OpaGps:
       sat.finalize()
       for kw in Z.cmisc.to_list('tracking_data acq_data stats'):
         tmp[kw] = getattr(sat, kw)
-      res[num]=tmp
-    with  open(self.dump_filename, 'wb') as f:
+      res[num] = tmp
+    with open(self.dump_filename, 'wb') as f:
       Z.pickle.dump(res, f)
-
 
 
 def test(ctx):
@@ -317,22 +326,21 @@ def test_gnuradio(ctx):
 def try_message(content):
   for i in range(2):
     print('TRY ', i)
-    if 1: content = list(1-np.array(content))
+    if 1: content = list(1 - np.array(content))
 
-
-    tmp =''.join(map(str, content))
+    tmp = ''.join(map(str, content))
     for x in Z.Format(tmp).bucket(300, 'x').v:
       print(x)
     subframe_length = 300
     lst = Z.defaultdict(set)
     for x in Z.re.finditer('10001011', tmp):
-      a ,b = x.start() // subframe_length, x.start()%subframe_length
+      a, b = x.start() // subframe_length, x.start() % subframe_length
       lst[b].add(a)
 
     cnds = []
     for k, v in lst.items():
       for i in range(0, len(tmp), subframe_length):
-        if i//subframe_length not in v: break
+        if i // subframe_length not in v: break
       else:
         cnds.append(k)
 
@@ -344,7 +352,6 @@ def try_message(content):
           print('\tON SUBFRAME ', j)
           for k, z in enumerate(Z.Format(y).bucket(30, 'x').v):
             print('\t\t', k, z)
-
 
 
 def decode_bits(ctx):
@@ -359,12 +366,11 @@ def decode_bits(ctx):
 
   cx = Z.DataOp.CleanBinaryDataSimple(bits)
   cx = Z.DataOp.PulseToClock(cx)
-  vals, spt =Z.DataOp.RetrieveBinaryData(cx)
+  vals, spt = Z.DataOp.RetrieveBinaryData(cx)
   try_message(vals.astype(int))
 
   #Z.plt.plot(cx)
   #Z.plt.show()
-
 
 
 def analyse_sats(ctx):
@@ -379,10 +385,9 @@ def analyse_sats(ctx):
   try:
     BLK = 1024
     for i in range(0, len(content), BLK):
-      gps.feed(content[i:i+BLK])
+      gps.feed(content[i:i + BLK])
   finally:
     gps.finalize()
-
 
 
 def test_pulse_shape_gps(ctx):
@@ -390,9 +395,9 @@ def test_pulse_shape_gps(ctx):
   # 10.23mhz bpsk signal sent on a bw of 20.46mhz (number 2=cutoff freq in firdes.low_pass)
   upsample = 100
   target_interval = upsample * 100
-  pulse = [1]*upsample
+  pulse = [1] * upsample
   sg = SignalBuilder(0, target_interval)
-  sg.add(target_interval //2, pulse)
+  sg.add(target_interval // 2, pulse)
   npulse = sg.get()
   taps = K.firdes.low_pass(1.0, upsample, 2, 3, K.firdes.WIN_HAMMING, 6.76)
 
@@ -409,7 +414,7 @@ def generate_test_bpsk(ctx):
   samples_per_chip = 5
   chips_per_prn = 1023
   ndata = 100
-  sb = SignalBuilder(0, samples_per_chip*(ndata+1) * chips_per_prn, dtype=np.complex128)
+  sb = SignalBuilder(0, samples_per_chip * (ndata + 1) * chips_per_prn, dtype=np.complex128)
   sats = list(range(4))
   nsats = len(sats)
 
@@ -432,16 +437,15 @@ def generate_test_bpsk(ctx):
 
   prn_ts = np.arange(samples_per_chip * chips_per_prn) / data.sample_rate
 
-
   for i in range(nsats):
     sig_data = cmisc.Attr()
     prn = prns[i]
     power_db = powers_db[i]
     offset = int(offsets[i] * samples_per_chip * chips_per_prn)
     prn_pw = Z.DataOp.Power(prn)
-    pulse = prn * (10 ** (power_db/20) / prn_pw)
+    pulse = prn * (10**(power_db / 20) / prn_pw)
     bin_data = np.random.randint(2, size=ndata)
-    cur_data = 2*bin_data - 1
+    cur_data = 2 * bin_data - 1
     phase = phase_start[i]
     doppler = dopplers[i]
 
@@ -469,11 +473,10 @@ def generate_test_bpsk(ctx):
       g.run()
       assert 0
 
-
   res = sb.get()
   if noise_db is not None:
     data.noiseless = np.array(res)
-    noise = np.random.normal(scale=10**(noise_db/20), size=len(res))
+    noise = np.random.normal(scale=10**(noise_db / 20), size=len(res))
     print(noise_db, Z.DataOp.Power_Db(noise))
     data.noise = noise
     res += noise
@@ -484,23 +487,23 @@ def generate_test_bpsk(ctx):
 
 
 class IncrementalLeastSquares:
+
   def __init__(self, dtype=np.complex128):
     self.r = 0
     self.dtype = dtype
-    self.m = np.zeros((self.r,self.r), dtype=self.dtype)
+    self.m = np.zeros((self.r, self.r), dtype=self.dtype)
     self.tb = []
 
   def add(self, v):
     self.r += 1
     self.tb.append(v)
     nm = np.zeros((self.r, self.r), dtype=self.dtype)
-    nm[:-1,:-1] = self.m
+    nm[:-1, :-1] = self.m
     for i in range(self.r):
-      nm[-1,i] = np.dot(v, np.conj(self.tb[i]))
-      nm[i,-1] = np.conj(nm[-1,i])
+      nm[-1, i] = np.dot(v, np.conj(self.tb[i]))
+      nm[i, -1] = np.conj(nm[-1, i])
 
     self.m = nm
-
 
   def compute(self, y):
     print('mat is >> ', self.m)
@@ -512,8 +515,9 @@ class IncrementalLeastSquares:
     val = np.matmul(res, self.tb)
     print(Z.DataOp.Power_Db(y))
     print(Z.DataOp.Power_Db(val))
-    print('>>>XUXU ', Z.DataOp.Power_Db(val-y))
+    print('>>>XUXU ', Z.DataOp.Power_Db(val - y))
     return res, val
+
 
 def solve_least_squares(tb, y):
   ls = IncrementalLeastSquares()
@@ -523,7 +527,7 @@ def solve_least_squares(tb, y):
   return ls.compute(y)
 
 
-def process_bits_xpsk(p, cur_ctx, nbits ,freq, prevs, start_pos, orig_data=None):
+def process_bits_xpsk(p, cur_ctx, nbits, freq, prevs, start_pos, orig_data=None):
 
   print('\nNew processing on sig db: ', Z.DataOp.Power_Db(cur_ctx.cleaned_sig))
   r = p.analyse_chip(freq, cur_ctx.cleaned_sig[:p.acq_proc_size], start_pos)
@@ -532,19 +536,18 @@ def process_bits_xpsk(p, cur_ctx, nbits ,freq, prevs, start_pos, orig_data=None)
   print(start_pos)
   sym_phases = list(r.sym_phases)
 
-
   start_phase = r.phase
   nstart_pos = start_pos + start_phase
 
   cur_phase = start_phase + p.conf.sps * len(sym_phases)
   for i in range(nbits):
-    cx = cur_ctx.cleaned_sig[cur_phase: cur_phase+p.conf.sps]
+    cx = cur_ctx.cleaned_sig[cur_phase:cur_phase + p.conf.sps]
     nr = p.analyse_chip(freq, cx, start_pos + cur_phase, acq=0)
     sym_phases.append(nr.sym_phase)
     cur_phase += p.conf.sps
 
-  bits =Z.DataOp.GetBPSKBits(sym_phases)
-  syms = 2*bits-1
+  bits = Z.DataOp.GetBPSKBits(sym_phases)
+  syms = 2 * bits - 1
   #syms = np.exp(1j * np.array(sym_phases))
   print('NBITS >> ', len(syms))
 
@@ -565,11 +568,11 @@ def process_bits_xpsk(p, cur_ctx, nbits ,freq, prevs, start_pos, orig_data=None)
   vec, sig_space = solve_least_squares(tb, orig)
   print('LEAST SQURE SOL ', vec)
 
-  print('GOOOT', Z.DataOp.Power_Db(orig-sig_space))
+  print('GOOOT', Z.DataOp.Power_Db(orig - sig_space))
   nsig = orig - sig_space
 
   print(Z.min_substr_diff(orig_data.bin_data, bits))
-  print(Z.min_substr_diff(orig_data.bin_data, 1^bits))
+  print(Z.min_substr_diff(orig_data.bin_data, 1 ^ bits))
 
   #rebuilt = sb.extract_peer(orig_data.sb)
   if cur_ctx.i == -1:
@@ -577,7 +580,7 @@ def process_bits_xpsk(p, cur_ctx, nbits ,freq, prevs, start_pos, orig_data=None)
     sbx.add(0, p.conf.pulse_shape)
     sbx.doppler_shift(freq, p.conf.sample_rate)
     g = K.GraphHelper(run_in_jupyter=0)
-    x = g.create_plot(plots=[np.angle(rebuilt)+ np.angle(sb.extract_peer(orig_data.sb))])
+    x = g.create_plot(plots=[np.angle(rebuilt) + np.angle(sb.extract_peer(orig_data.sb))])
     #x = g.create_plot(plots=[np.angle(sb.extract_peer(orig_data.sb))])
     #x = g.create_plot(plots=[np.log10(np.abs(Z.signal.correlate(cur_ctx.cleaned_sig, sbx.get())))])
     x = g.create_plot(plots=[np.log10(np.abs(Z.signal.correlate(cur_ctx.orig_sig, sbx.get())))])
@@ -587,12 +590,18 @@ def process_bits_xpsk(p, cur_ctx, nbits ,freq, prevs, start_pos, orig_data=None)
     g.run()
     return
 
-
-
-
   print(Z.DataOp.GetBPSKBits(sym_phases))
   print(np.abs(np.diff(np.unwrap(sym_phases))))
-  return cmisc.Attr(nsig=nsig, start_phase=start_phase, rebuilt=rebuilt, bits=bits, sb=sb, orig_data=orig_data, nstart_pos=nstart_pos)
+  return cmisc.Attr(
+      nsig=nsig,
+      start_phase=start_phase,
+      rebuilt=rebuilt,
+      bits=bits,
+      sb=sb,
+      orig_data=orig_data,
+      nstart_pos=nstart_pos
+  )
+
 
 def real_decode(ctx):
   d = Z.pickle.load(open(ctx.infile, 'rb'))
@@ -612,21 +621,21 @@ def real_decode(ctx):
   start_pos = samples_per_prn
   cx = d.signal
 
-
-
-  cur_ctx=  cmisc.Attr(orig_sig=cx, cleaned_sig=cx[start_pos:])
+  cur_ctx = cmisc.Attr(orig_sig=cx, cleaned_sig=cx[start_pos:])
   prevs = []
   for i in range(len(d.orig_data)):
-    if i==-1:
+    if i == -1:
       print('goot')
       g = K.GraphHelper(run_in_jupyter=0)
-      x = g.create_plot(plots=[np.abs(cx), np.abs(d.signal[start_pos:start_pos+len(cx)])])
+      x = g.create_plot(plots=[np.abs(cx), np.abs(d.signal[start_pos:start_pos + len(cx)])])
       g.run()
       return
     conf.pulse_shape = get_l1ca_pulse(d.orig_data[i].sat, d.samples_per_chip)
     p = OpaXpsk(conf)
     cur_ctx.i = i
-    dd = process_bits_xpsk(p, cur_ctx, 20-2*i, d.orig_data[i].doppler, prevs, start_pos, d.orig_data[i])
+    dd = process_bits_xpsk(
+        p, cur_ctx, 20 - 2 * i, d.orig_data[i].doppler, prevs, start_pos, d.orig_data[i]
+    )
     cur_ctx.cleaned_sig = dd.nsig
     prevs.append(dd)
     start_pos = dd.nstart_pos
@@ -634,16 +643,13 @@ def real_decode(ctx):
     bits = dd.bits >= 0.5
     print(dd.bits, len(bits))
     print(Z.min_substr_diff(d.orig_data[i].bin_data, bits))
-    print(Z.min_substr_diff(d.orig_data[i].bin_data, 1^bits))
+    print(Z.min_substr_diff(d.orig_data[i].bin_data, 1 ^ bits))
     print(d.orig_data[i].bin_data)
     print()
-
 
   #d2 = process_bits_xpsk(p, d1.nsig[samples_per_prn:], 5)
   print(Z.DataOp.Power_Db(cx))
   return
-
-
 
   for i in range(1, 6):
     conf.pulse_shape = get_l1ca_pulse(i, d.samples_per_chip)
@@ -652,17 +658,179 @@ def real_decode(ctx):
     print(r)
     break
 
+
 def test_correl(ctx):
   a = get_l1ca_pulse(0, 5)
-  b=np.concatenate((a, a))
+  b = np.concatenate((a, a))
   g = K.GraphHelper(run_in_jupyter=0)
   x = g.create_plot(plots=[np.log10(np.abs(Z.signal.correlate(a, b)))])
   x = g.create_plot(plots=[np.abs(Z.signal.correlate(a, b))])
 
-  sb = SignalBuilder(0, n=2*len(a), dtype=np.complex128)
+  sb = SignalBuilder(0, n=2 * len(a), dtype=np.complex128)
   sb.add_multiple(0, [1, -1], a, len(a))
   x = g.create_plot(plots=[np.abs(Z.signal.correlate(a, sb.get(), method='direct'))])
   g.run()
+
+
+def test_gps_4msps(ctx):
+  fil = '/home/benoit/programmation/dsp/data/gps_4msps_c64.dat'
+  ds = Z.DataFile(fil, typ='complex64').to_ds()
+  #ds = ds[:2000000]
+
+  ds = ds[1000:]
+
+  orig_center_freq = 1575.42e6
+  orig_sample_rate = 4e6
+  samples_per_chip = 4
+  doppler_step = 20
+
+  mp = {
+      1: (5062,),
+      4: (3874,),
+      5: (625,),
+      9: (1187,),
+      29: (1437,),
+  }
+
+  res = []
+  nds = None
+  for sat_num in mp.keys():
+    conf = cmisc.Attr()
+    conf.acq_doppler = mp[sat_num]
+    conf.track_doppler = cmisc.Attr(
+        max_doppler_rate=8,
+        doppler_step=1,
+    )
+    conf.track_doppler = np.linspace(-1, 1, 4)
+    conf.update(ctx)
+    nsyms = ctx.nsyms
+
+    tmp = proc_ds(ds, orig_center_freq, orig_sample_rate, samples_per_chip, sat_num, nsyms, conf)
+    nds = tmp.ds
+    res.append(cmisc.Attr(sat_num=sat_num, output=tmp.p.output, conf=tmp.p.conf))
+  return cmisc.Attr(ds=nds, lst=res, orig_ds=ds)
+
+
+def test_seti(ctx):
+  data = Z.DataFile('/home/benoit/programmation/dsp/data/test.dat', typ='complex8')
+  ds = data.to_ds()
+  ds = ds[:2000000]
+
+  orig_center_freq = 1575e6
+  orig_sample_rate = 8.7381e6
+  samples_per_chip = 8
+
+  sat_num = 26
+  conf = cmisc.Attr()
+  conf.acq_doppler = (1057,)
+  conf.track_doppler = cmisc.Attr(
+      max_doppler_rate=8,
+      doppler_step=1,
+  )
+  conf.update(ctx)
+  nsyms = ctx.nsyms
+
+  p = proc_ds(ds, orig_center_freq, orig_sample_rate, samples_per_chip, sat_num, nsyms, conf)
+  return p
+
+
+def proc_ds(
+    ds,
+    orig_center_freq,
+    orig_sample_rate,
+    samples_per_chip,
+    sat_num,
+    nsyms=10,
+    alpha_tsync=1,
+    proc=1,
+    kwargs={},
+):
+
+  chips_per_prn = kGPS_CHIPS_PER_PRN
+  prn_freq = kGPS_PRN_FREQ
+  bpsk_rate = kGPS_CHIP_FREQ
+  sample_rate = samples_per_chip * chips_per_prn * prn_freq
+  center_freq = kGPS_CENTER_FREQ
+  l1ca_repeat = 1
+  acq_sym = 5
+
+  symbol_rate = prn_freq // l1ca_repeat
+  conf = cmisc.Attributize(
+      sample_rate=sample_rate,
+      sps=samples_per_chip * chips_per_prn * l1ca_repeat,
+      symbol_rate=symbol_rate,
+      n_acq_symbol=acq_sym,
+      max_doppler_shift=0,
+      doppler_space_size=1,
+      SNR_THRESH=10,
+      skip_ratio=0,
+      jitter=5,
+      pulse_shape=list(get_l1ca_pulse(sat_num, samples_per_chip)) * l1ca_repeat,
+      PROB_THRESH=1e-7,
+      fixed_sps_mode=0,
+  )
+
+  ds = ds[:2 * conf.sps * nsyms]
+
+  conf.update(kwargs)
+
+  from gnuradio.filter import firdes
+  from gnuradio import gr, blocks, filter
+
+  taps = firdes.low_pass(
+      1.0, orig_sample_rate, bpsk_rate * 1.1, bpsk_rate * 0.5, firdes.WIN_HAMMING, 6.76
+  )
+  fil = filter.freq_xlating_fir_filter_ccc(
+      1, taps, (center_freq - orig_center_freq), orig_sample_rate
+  )
+
+  resampler = filter.mmse_resampler_cc(0, orig_sample_rate / sample_rate)
+  tmp = ds.y.astype(np.complex64)
+  #tmp = list(map(complex, ds.y))
+
+  if 1:
+    ny = opa_dsp_base.run_block(
+        opa_dsp_base.make_graph(chain=[tuple(ds.y), fil, resampler]), out_type=np.complex64
+    )
+  else:
+    ny = opa_dsp_base.run_block(
+        opa_dsp_base.make_graph(chain=[tuple(ds.y), resampler]), out_type=np.complex64
+    )
+  nds = ds.make_new('prepare', y=ny, samp_rate=sample_rate)
+
+  def analyse1(p, doppler_space, sig):
+    tb = []
+    sig = sig[:p.acq_proc_size]
+    print(len(doppler_space))
+    for doppler in doppler_space:
+      r = p.analyse_chip(doppler, sig)
+      tb.append(r)
+    mx = max(tb, key=lambda x: x.snr)
+    mx2 = max(tb, key=lambda x: x.prob_detection)
+    return cmisc.Attr(by_snr=mx, by_prob=mx2)
+
+  #doppler_space = np.arange(-2000, 2000, 300)
+
+  sig = nds.y[:conf.sps * nsyms]
+  p = OpaXpsk(conf)
+  if not proc:
+    return cmisc.Attr(ds=nds, p=p, analyse1=analyse1)
+
+  tsync = opa_dsp_base.TimingSyncBlock(
+      resamp_ratio=1, sps_base=conf.sps, sig=np.complex64, alpha=alpha_tsync
+  )
+  p.sps_track = tsync.sps
+  blk = opa_dsp_base.ChainBlock([tsync, p], blk_size=conf.sps)
+  print('START >> ', len(sig), sat_num)
+  blk.feed(sig)
+  return cmisc.Attr(ds=nds, p=p, tsync=tsync, blk=blk)
+
+
+#1 6.982685490120044e-05 5062.5
+#4 7.495027931625486e-10 3875.0
+#5 3.018314105318609e-07 625.0
+#9 0.00013229216830179524 1187.5
+#29 4.773959005888173e-14 1437.5
 
 
 def main():

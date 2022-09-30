@@ -1,0 +1,163 @@
+
+from chdrft.config.env import g_env
+import chdrft.utils.K as K
+g_env.set_qt5(1, 1)
+%gui qt5
+init_jupyter()
+import chdrft.dsp.gps as opa_gps
+import chdrft.dsp.base as opa_dsp_base
+
+
+data = Z.DataFile('/home/benoit/programmation/dsp/data/test.dat', typ='complex8')
+ds = data.to_ds()[:1000000]
+
+orig_center_freq = 1575e6
+orig_sample_rate = 8.7381e6
+samples_per_chip = 8
+
+
+
+
+
+data = Z.DataFile('/home/benoit/programmation/dsp/data/gps/gps_4msps_complex.12Sep2005_1575.42_c64.dat', typ=np.complex64)
+ds = data.to_ds()[:1000000]
+
+orig_center_freq = 1575.42e6
+orig_sample_rate = 4e6
+samples_per_chip = 4
+
+
+
+
+chips_per_prn = opa_gps.kGPS_CHIPS_PER_PRN
+prn_freq = opa_gps.kGPS_PRN_FREQ
+bpsk_rate = opa_gps.kGPS_CHIP_FREQ
+sample_rate = samples_per_chip * chips_per_prn * prn_freq
+center_freq = opa_gps.kGPS_CENTER_FREQ
+
+
+water = Z.DataOp.FreqWaterfall_DS(nds, 2**10)
+
+resx = water.new_y(Z.dsp_utils.g_fft_helper.map(water.y, quant=0.01))
+g = K.GraphHelper(run_in_jupyter=1)
+g.create_plot(images=[resx.transpose()])
+#g.create_plot(plots=[np.abs(ds.y)])
+g.run()
+
+from gnuradio.filter import firdes
+from gnuradio import gr, blocks, filter
+
+
+taps = firdes.low_pass(1.0, orig_sample_rate, bpsk_rate * 1.1, bpsk_rate * 0.5, firdes.WIN_HAMMING, 6.76)
+fil = filter.freq_xlating_fir_filter_ccc(1, taps, (center_freq - orig_center_freq), orig_sample_rate)
+
+resampler = filter.mmse_resampler_cc(0, orig_sample_rate / sample_rate)
+tmp = ds.y.astype(np.complex64)
+#tmp = list(map(complex, ds.y))
+
+ny = opa_dsp_base.run_block(opa_dsp_base.make_graph(chain=[tuple(ds.y), fil, resampler]), out_type=np.complex64)
+nds = ds.make_new('prepare', y=ny, samp_rate=sample_rate)
+
+
+
+def get_p(sat_num, acq_sym):
+  doppler_max_step  =  prn_freq / acq_sym / 2
+  conf = cmisc.Attributize(
+      sample_rate=sample_rate,
+      sps=samples_per_chip * chips_per_prn,
+      symbol_rate=prn_freq,
+      n_acq_symbol=acq_sym,
+      max_doppler_shift=0,
+      doppler_space_size=1,
+      SNR_THRESH=10,
+      skip_ratio=0,
+      jitter=0,
+      pulse_shape = opa_gps.get_l1ca_pulse(sat_num, samples_per_chip),
+      doppler_step = doppler_max_step / 4,
+  )
+  p = opa_gps.OpaXpsk(conf)
+  return p
+
+print(doppler_step)
+
+doppler_space =  np.arange(1040, 1070, 2)
+#doppler_space = np.arange(-2000, 2000, 300)
+p = get_p(26, 3)
+sig = nds.y[p.acq_proc_size:p.acq_proc_size*2]
+
+
+
+doppler_space =  np.arange(-2000, 2000, doppler_step)
+sig = RMX.dbg.noise[p.acq_proc_size: p.acq_proc_size*2]
+print(p.acq_proc_size, len(mx.dbg.noise))
+
+
+g = K.GraphHelper(run_in_jupyter=1)
+#g.create_plot(plots=[np.abs(sig)])
+g.create_plot(plots=[np.abs(nds.y[p.acq_proc_size:p.acq_proc_size*2])])
+g.run()
+
+
+nsyms = 3
+p0 = get_p(0, nsyms)
+doppler_space =  np.arange(-2000, 2000, p0.conf.doppler_step)
+for sid in range(opa_gps.Satellites.nsats()):
+  tb = []
+  p = get_p(sid, nsyms)
+  sig = nds.y[-p.acq_proc_size:]
+  for doppler in doppler_space:
+    r = p.analyse_chip(doppler, sig)
+    tb.append(r)
+  mx = max(tb, key=lambda x: x.snr)
+  print(sid, mx.snr, mx.correl_max)
+
+tb = []
+for doppler in doppler_space:
+  r = p.analyse_chip(doppler, sig)
+  tb.append(r)
+mx = max(tb, key=lambda x: x.snr)
+mx.snr
+
+
+r = p.analyse_chip(1068, sig, dbg=1)
+
+np.linalg.norm(r.dbg.noise)
+print(np.linalg.norm(r.dbg.s - r.dbg.f * np.dot(r.dbg.s, r.dbg.f)))
+print(np.linalg.norm(r.dbg.s - r.dbg.f * np.conj(np.dot(r.dbg.s, r.dbg.f))))
+np.linalg.norm(r.dbg.noise)
+
+RMX = mx
+
+target_doppler = 1000
+r = p.analyse_chip(target_doppler, sig, dbg=0)
+r
+
+%matplotlib qt
+Z.plt.figure()
+interval = nds.y[:conf.sps]
+dy = np.abs(Z.signal.correlate(interval, nds.y[:3*conf.sps], mode='full'))
+dx = np.array(range(len(dy)))
+
+Z.plt.plot(dx, dy)
+  
+8738133
+
+
+sat_num  = 26
+prn = opa_gps.get_l1ca_pulse(sat_num, samples_per_chip)
+prn = list(prn) + list(prn)
+t = 2*np.pi * 1j * np.arange(len(prn)) / conf.sample_rate
+
+
+
+shift_seq = np.exp(p.pulse_t_acq * target_doppler) * dx
+correl = Z.signal.correlate(shift_seq, conf.pulse_shape, mode='valid')
+Z.plt.plot(np.abs(correl))
+
+
+Z.FileFormatHelper.Write('/tmp/test.pickle', cmisc.Attr(conf=conf, ds=ds))
+
+
+dd = Z.FileFormatHelper.Read('/tmp/test.pickle')
+conf = dd.conf
+ds = dd.ds

@@ -1,5 +1,6 @@
 import pandas as pd
 import bs4
+from chdrft.cmds import Cmds
 
 def to_csv(tb_2d):
   return pd.DataFrame(tb_2d).to_csv(index=False, header=False)
@@ -28,4 +29,11 @@ def html_to_df(s):
     assert len(headers) == 1
     headers=headers[0]
   return pd.DataFrame.from_records(data, columns=headers)
+
+
+@Cmds.make
+def mesh_reencode(infile:str, outfile:str):
+  import pymesh
+  binary = '.bin' in outfile
+  pymesh.save_mesh(outfile, pymesh.load_mesh(infile), ascii=not binary)
 

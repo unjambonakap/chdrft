@@ -5,6 +5,7 @@ from clang.cindex import conf
 from jsonpickle import handlers
 import pprint as pp
 from chdrft.utils.misc import Dict, Attributize, NormHelper, csv_list, BitOps
+import chdrft.utils.misc as cmisc
 from chdrft.graph.base import OpaGraph
 from collections import deque
 import subprocess as sp
@@ -17,6 +18,7 @@ import struct
 import glog
 import collections
 from asq.initiators import query as asq_query
+import ctypes
 def to_str(x):
   if isinstance(x, str): return x
   return x.decode()
@@ -60,6 +62,7 @@ class TypesHelper:
       size = int(size)
       names = names.split(',')
       name = names[0]
+
       typ = 'unsigned'
       if name in csv_list('float,double'):
         typ = 'float'
@@ -68,12 +71,18 @@ class TypesHelper:
       elif name[0] == 's':
         typ = 'signed'
 
+      ctypes_typ = typ
+      if typ == 'unsigned': ctypes_typ = f'uint{size*8}'
+      else: ctypes_typ = f'int{size*8}'
+      ctype = cmisc.failsafe_or(lambda: getattr(ctypes, f'c_{ctypes_typ}'))
+
       clang_types_list = [TypeKind.__dict__[e] for e in clang_types.split(',')]
       x = Attributize(name=name,
                       alias=names,
                       clang_types_list=clang_types_list,
                       size=size,
                       pack=pack,
+                      ctype=ctype,
                       typ=typ)
       self.types.append(x)
       for name in names:
@@ -250,13 +259,16 @@ class OpaFunction:
     self.shortname = to_str(cursor.spelling)
 
     self.typ = None
+    self.restype = None
     self.args = []
 
   def build(self):
     self.typ = self.index.get_typ(self.cursor)
+    restype = self.typ.internal_typ.get_result()
     for x in self.cursor.get_arguments():
       typ = self.index.get_typ(x)
       self.args.append(Attributize(name=x.spelling, typ=typ))
+    self.restype = self.index.get_typ(None, restype)
     return True
 
 
@@ -436,7 +448,7 @@ class OpaBaseType(object):
     self.ptr_count = 0
     self.typ_data = None
     self.kind = ''
-    self.atom_size = None
+    self.atom_size = 1
     self.choices = ChoiceHelper()
     self.is_enum = False
     self.enum_vals_long = Attributize(key_norm=NormHelper.byte_norm)

@@ -1,19 +1,21 @@
-from chdrft.display.base import QtWidgets, QtCore
+#!/usr/bin/env python
+
+from chdrft.display.base import qt_imports
 import sys
 import numpy as np
 import pyqtgraph as pg
+pg.setConfigOption('imageAxisOrder', 'row-major')  # fuckoff
+
 import pyqtgraph.ptime as ptime
 import scipy.ndimage as ndimage
 from scipy import signal
-import chdrft.display.test_ui as test_ui
 import glog
 import pandas as pd
-from vispy.color import Color
+from vispy.color import Color, get_colormap
 
 from chdrft.utils.misc import to_list, Attributize, proc_path, is_interactive
 from chdrft.utils.colors import ColorPool
 from asq.initiators import query as asq_query
-from chdrft.display.utils import *
 from chdrft.display.dsp_ui import DspTools
 from chdrft.struct.base import Range2D, Intervals
 
@@ -26,7 +28,9 @@ from chdrft.utils.cmdify import ActionHandler
 from chdrft.utils.misc import Attributize
 import chdrft.utils.misc as cmisc
 import glog
+from chdrft.config.env import g_env
 
+from chdrft.dsp.datafile import Dataset2d, Dataset
 
 global flags, cache
 flags = None
@@ -36,7 +40,6 @@ cache = None
 def args(parser):
   clist = CmdsList()
   ActionHandler.Prepare(parser, clist.lst, global_action=1)
-
 
 
 class EventHelper:
@@ -54,15 +57,15 @@ class EventHelper:
       pos = pg.Point(pos)
     self._pos = pos
 
-  def has_ctrl(self):
-    return (self.mods & QtCore.Qt.ControlModifier) != 0
+  def has_meta(self):
+    return (self.mods & qt_imports.QtCore.Qt.MetaModifier) != 0
 
   def has_shift(self):
-    return (self.mods & QtCore.Qt.ShiftModifier) != 0
+    return (self.mods & qt_imports.QtCore.Qt.ShiftModifier) != 0
 
   @staticmethod
   def FromModifiers():
-    return QtWidget.QApplication.keyboardModifiers()
+    return qt_imports.QtWidget.QApplication.keyboardModifiers()
 
   def pos(self):
     return self._pos
@@ -106,9 +109,9 @@ class SamplingRegion(pg.LinearRegionItem):
 
   def notify_key_press(self, h):
     h.ev.accept()
-    if h.key() == QtCore.Qt.Key_H:
+    if h.key() == qt_imports.QtCore.Qt.Key_H:
       self.set_left(h.pos().x())
-    elif h.key() == QtCore.Qt.Key_L:
+    elif h.key() == qt_imports.QtCore.Qt.Key_L:
       self.set_right(h.pos().x())
     else:
       h.ev.ignore()
@@ -145,7 +148,7 @@ class PlotMenu:
 
   def __init__(self, plot):
     self.plot = plot
-    self.menu = QtGui.QMenu()
+    self.menu = qt_imports.QtWidgets.QMenu()
     self.submenus = QContainer()
 
     glog.debug('set menu')
@@ -169,7 +172,7 @@ class RegionManager:
     self.regions = []
     self.last = None
     self.set_menu()
-    self.create_keys = [QtCore.Qt.Key_H, QtCore.Qt.Key_L]
+    self.create_keys = [qt_imports.QtCore.Qt.Key_H, qt_imports.QtCore.Qt.Key_L]
     self.active_region = None
 
   def set_menu(self):
@@ -208,7 +211,7 @@ class RegionManager:
       self.last.notify_key_press(h)
       return
 
-    if h.key() == QtCore.Qt.Key_Escape or h.key() == QtCore.Qt.Key_Delete:
+    if h.key() == qt_imports.QtCore.Qt.Key_Escape or h.key() == qt_imports.QtCore.Qt.Key_Delete:
       r = self.find_hovering()
       if r:
         self.remove_region(r)
@@ -218,9 +221,9 @@ class RegionManager:
 
   def mouse_press(self, ev):
     self.active_region = self.find_hovering()
-    if not EventHelper(ev).has_ctrl():
+    if not EventHelper(ev).has_meta():
       return
-    if ev.button() != QtCore.Qt.LeftButton:
+    if ev.button() != qt_imports.QtCore.Qt.LeftButton:
       return
     region = self.add_region()
     region.notify_mouse_press(ev)
@@ -283,7 +286,7 @@ class Marks:
       nx.append(x)
       ny.append(self.data.sample_at(x))
 
-    return DataSet(x=nx, y=ny, orig_dataset=self.data)
+    return Dataset(x=nx, y=ny, orig_dataset=self.data)
 
 
 class Sampler:
@@ -305,7 +308,7 @@ class Sampler:
 
   def mark(self):
     r = self.plot.last_hovered
-    n, ok = QtGui.QInputDialog.getInt(self.plot, 'Count', 'count')
+    n, ok = qt_imports.QtWidgets.QInputDialog.getInt(self.plot, 'Count', 'count')
     if not ok or n < 2:
       glog.debug('bad choice %s %s', ok, n)
       return
@@ -352,13 +355,21 @@ class ImageEntry:
     self.data = data
     self.kwargs = kwargs
     self.obj = None
+    self.cmap = kwargs.get('cmap', None)
     self.plot_widget = None
 
   def register(self, plot_widget):
     self.plot_widget = plot_widget
-    self.obj = pg.ImageItem(self.data.y)
+    ndata = self.data
+    self.obj = pg.ImageItem(ndata.y)
+    if self.cmap:
+      self.obj.setLookupTable(self.cmap.getLookupTable())
+
+    self.obj.setCompositionMode(qt_imports.QtGui.QPainter.CompositionMode_Plus)
+
     self.plot_widget.viewbox.addItem(self.obj)
-    self.obj.setRect(self.data.range2d.to_qrectf())
+    r = ndata.box.to_qrectf()
+    self.obj.setRect(r)
 
   def unregister(self):
     assert 0
@@ -371,11 +382,13 @@ class PlotEntry:
     self.kwargs = kwargs
     self.obj = None
     self.plot_widget = None
-    self.data.sig_replot_cb=self.update
+    self.data.sig_replot_cb = self.update
 
   def register(self, plot_widget):
     self.plot_widget = plot_widget
-    self.obj = self.plot_widget.plot(self.data.get_x(), self.data.get_y(), name=self.data.name, **self.kwargs)
+    self.obj = self.plot_widget.plot(
+        self.data.get_x(), self.data.get_y(), name=self.data.name, **self.kwargs
+    )
     self.plot_widget.sigRangeChanged.connect(self.sig_range_changed)
     self.obj.curve.setClickable(True)
     self.obj.curve.sigClicked.connect(self.clicked_plot)
@@ -383,13 +396,14 @@ class PlotEntry:
   def unregister(self):
     self.plot_widget.sigRangeChanged.disconnect(self.sig_range_changed)
     self.plot_widget.removeItem(self.obj)
-    self.plot_widget.plotItem.legend.removeItem(self.data.name)
+    if self.plot_widget.legend: self.plot_widget.plotItem.legend.removeItem(self.data.name)
 
   def sig_range_changed(self, new_view_range):
     self.obj.curve._mouseShape = None
 
   def clicked_plot(self):
     self.plot_widget.action_manager.notify_clicked_curve(self)
+
   def update(self):
     self.obj.setData(self.data.get_x(), self.data.get_y())
 
@@ -413,8 +427,8 @@ class ShadowPlotEntry:
     self.maybe_update_data()
 
   def maybe_update_data(self):
-    if self.active_range is None or not self.active_range.shift(self.shift).contains(
-        self.cur_view_range):
+    if self.active_range is None or not self.active_range.shift(self.shift
+                                                               ).contains(self.cur_view_range):
       self.view_range = self.cur_view_range.double()
       self.update()
       return True
@@ -425,8 +439,8 @@ class ShadowPlotEntry:
     self.update_view_range(new_view_range)
 
   def update(self):
-    self.cur_data = self.main_entry.data.extract_by_x(self.cur_view_range.xr.shift(-self.shift[
-        0])).shift(self.shift)
+    self.cur_data = self.main_entry.data.extract_by_x(self.cur_view_range.xr.shift(-self.shift[0])
+                                                     ).shift(self.shift)
     self.obj.setData(x=self.cur_data.get_x(), y=self.cur_data.get_y())
 
   def update_shift(self, new_shift):
@@ -474,10 +488,13 @@ class DragCurve:
     return h.has_shift()
 
   def maybe_activate(self, h):
-    if not self.should_activate_on_click(h): return False
-    if self.entry is not None: return False
+    if not self.should_activate_on_click(h):
+      return False
+    if self.entry is not None:
+      return False
     best_curve = self.find_best_curve(h.pos())
-    if best_curve is None: return False
+    if best_curve is None:
+      return False
 
     self.do_activate(h, best_curve)
     return True
@@ -488,10 +505,9 @@ class DragCurve:
     self.end_pos = self.start_pos
     self.tot_shift = pg.Point()
     self.entry.obj.setAlpha(0.3, False)
-    self.shadow_entry = ShadowPlotEntry(self.entry,
-                                        self.plot.get_view_range(),
-                                        self.plot,
-                                        pen={'color': self.plot.get_color()})
+    self.shadow_entry = ShadowPlotEntry(
+        self.entry, self.plot.get_view_range(), self.plot, pen={'color': self.plot.get_color()}
+    )
     self.plot.addItem(self.shadow_entry.obj)
     self.drag = True
 
@@ -519,9 +535,9 @@ class DragCurve:
     return True
 
   def notify_key(self, key):
-    if key == QtCore.Qt.Key_Escape:
+    if key == qt_imports.QtCore.Qt.Key_Escape:
       self.cancel()
-    elif key == QtCore.Qt.Key_Enter or key == QtCore.Qt.Key_Return:
+    elif key == qt_imports.QtCore.Qt.Key_Enter or key == qt_imports.QtCore.Qt.Key_Return:
       self.validate()
     else:
       return False
@@ -598,23 +614,27 @@ class ActionManager:
 
 class OpaPlot(pg.PlotWidget):
 
-  def __init__(self, plots=[], images=[], *args, **kwargs):
+  def __init__(self, plots=[], images=[], legend=0, *args, **kwargs):
     super().__init__(*args, viewBox=ViewBox2(), **kwargs)
     self.manager = None
     self.menu = PlotMenu(self)
     self.regions = RegionManager(self)
     self.sampler = Sampler(self)
     self.last_hovered = None
-    self.color_pool = ColorPool()
     self.names = set()
     self.dsp_tools = DspTools(self)
     self.sigRangeChanged.connect(self.sig_range_changed)
     self.viewbox = self.getPlotItem().getViewBox()
-    self.addLegend()
+    self.legend = legend
+
+    if legend: self.addLegend()
 
     self.getPlotItem().getViewBox().menu = self.menu.menu
     self.setup_menu()
     self.opa_plots = QContainer()
+    self.color_pool = ColorPool()
+    self.cpool2 = cmisc.InfGenerator(get_colormap('viridis'))
+
     for plot in to_list(plots):
       self.add_plot(plot)
 
@@ -625,11 +645,23 @@ class OpaPlot(pg.PlotWidget):
 
     self.action_manager = ActionManager(self)
 
+
+  def installEventFilter(self, ev):
+    #super().installEventFilter(ev)
+    qt_imports.QtWidgets.QGraphicsView.installEventFilter(self, ev)
+    self.getPlotItem().installEventFilter(ev)
+    self.getPlotItem().getViewBox().installEventFilter(ev)
+    self.getPlotItem().getViewBox()
+    self.viewport().installEventFilter(ev)
+
   def show_grid(self):
     self.getPlotItem().showGrid(x=True, y=True)
 
   def get_color(self):
-    self.used_color = self.color_pool.get_rgb()
+    if 0:
+      self.used_color = self.color_pool.get_rgb()
+    else:
+      self.used_color = self.cpool2().rgb[0] * 255
     return self.used_color
 
   def get_view_range(self):
@@ -646,9 +678,9 @@ class OpaPlot(pg.PlotWidget):
 
   def add_plot(self, plot_entry, **kwargs):
     if isinstance(plot_entry, (tuple, list, np.ndarray)):
-      plot_entry = DataSet(plot_entry)
+      plot_entry = Dataset(plot_entry)
 
-    if isinstance(plot_entry, DataSet):
+    if isinstance(plot_entry, Dataset):
       plot_entry = PlotEntry(plot_entry, **kwargs)
     glog.info('Adding plot with name=%s', plot_entry.data.name)
 
@@ -661,7 +693,8 @@ class OpaPlot(pg.PlotWidget):
     if pen is not None and 'color' not in pen:
       if 'color' in plot_entry.kwargs:
         color = Color(plot_entry.kwargs['color']).RGB
-      else: color = self.get_color()
+      else:
+        color = self.get_color()
       pen['color'] = color
 
     self.opa_plots.append(plot_entry)
@@ -669,7 +702,9 @@ class OpaPlot(pg.PlotWidget):
     return plot_entry
 
   def add_image(self, image_entry):
-    if isinstance(image_entry, Dataset2D):
+    if isinstance(image_entry, np.ndarray):
+      image_entry = Dataset2d(image_entry)
+    if isinstance(image_entry, Dataset2d):
       image_entry = ImageEntry(image_entry)
     glog.info('Adding image ')
 
@@ -677,18 +712,22 @@ class OpaPlot(pg.PlotWidget):
     return image_entry
 
   def save_figure(self):
-    path, ok = QtGui.QInputDialog.getText(self, 'Path', 'path')
-    if not ok: return
-    cols=[]
-    data={}
+    path, ok = qt_imports.QtWidgets.QInputDialog.getText(self, 'Path', 'path')
+    if not ok:
+      return
+    cols = []
+    data = {}
     for plot in self.opa_plots:
-      assert not plot.data.name in data, 'already have name %s in %s'%(plot.data.name, data.keys())
+      assert not plot.data.name in data, 'already have name %s in %s' % (
+          plot.data.name, data.keys()
+      )
       data[plot.data.name] = plot.data.y
     df = pd.DataFrame(data, index=self.opa_plots[0].data.x)
     df.to_csv(path, index=True, index_label='x')
 
   def remove_plot(self, plot_entry):
-    self.color_pool.release(self.used_color)
+    if 0:
+      self.color_pool.release(self.used_color)
     assert plot_entry in self.opa_plots
     plot_entry.unregister()
     self.opa_plots.remove(plot_entry)
@@ -717,7 +756,7 @@ class OpaPlot(pg.PlotWidget):
     return self.getPlotItem().getViewBox().mapSceneToView(pg.Point(pos))
 
   def get_cursor_pos(self):
-    pos = QtGui.QCursor.pos()
+    pos = qt_imports.QtGui.QCursor.pos()
     pos = self.mapFromGlobal(pos)
     pos = self.to_view_coord(pos)
     return pos
@@ -789,28 +828,32 @@ class ViewBox2(pg.ViewBox):
 
 class PlotManager:
 
-  def __init__(self, parent, layout):
+  def __init__(self, parent):
     self.parent = parent
-    self.layout = layout
     self.plots = []
 
   def create_plot(self, cl, *args, **kwargs):
-    plot = cl(*args, parent=self.parent, **kwargs)
+    plot = cl(*args, parent=self.parent.w, **kwargs)
     self.plots.append(plot)
     plot.manager = self
-    self.layout.addWidget(plot)
+    self.parent.add(plot)
     return plot
 
   def remove_plot(self, plot):
     self.plots.remove(plot)
-    self.layout.removeWidget(plot)
+    self.parent.remove(plot)
 
 
-class MainWindow(QtGui.QMainWindow):
+class MainWindow(qt_imports.QtWidgets.QMainWindow):
+
   def __init__(self, *args, **kwargs):
     super().__init__(*args, **kwargs)
     self.setWindowTitle('dsp display')
-    self.ui = test_ui.Ui_MainWindow()
+    if g_env.qt5:
+      from chdrft.display.test_ui import Ui_MainWindow
+    else:
+      from chdrft.display.test_ui4 import Ui_MainWindow
+    self.ui = Ui_MainWindow()
     self.ui.setupUi(self)
 
   #def closeEvent(self, event):
@@ -819,6 +862,7 @@ class MainWindow(QtGui.QMainWindow):
 
 
 class OpaMainWindow(MainWindow):
+
   def __init__(self, close_cb):
     super().__init__()
     self.close_cb = close_cb
@@ -827,14 +871,15 @@ class OpaMainWindow(MainWindow):
     self.close_cb()
     super().closeEvent(ev)
 
+
 class GraphHelper:
 
   def __init__(self, create_kernel=False, run_in_jupyter=0):
 
     self.run_in_jupyter = run_in_jupyter
-    self.app = QtCore.QCoreApplication.instance()
+    self.app = qt_imports.QtCore.QCoreApplication.instance()
     if self.app is None:
-      self.app = QtWidgets.QApplication([])
+      self.app = qt_imports.QApplication([])
     self.app.setQuitOnLastWindowClosed(True)
     self.app.aboutToQuit.connect(self.about_to_quit)
     #QtCore.QObject.connect(self.app, Qt.SIGNAL("lastWindowClosed()"),
@@ -843,8 +888,8 @@ class GraphHelper:
     self.ipkernel = None
     if create_kernel:
       self.ipkernel = IPKernelApp.instance()
-      self.ipkernel.initialize(['python', '--matplotlib=qt' ])
-      glog.info('stuff >> %s',self.ipkernel.connection_file)
+      self.ipkernel.initialize(['python', '--matplotlib=qt'])
+      glog.info('stuff >> %s', self.ipkernel.connection_file)
     self.cleanups_cb = []
 
     self.win = OpaMainWindow(self.close_main_window)
@@ -854,17 +899,25 @@ class GraphHelper:
 
     #self.vb = ViewBox2()
     #self.vb.setAspectLocked()
-    self.manager = PlotManager(self.win, self.win.ui.verticalLayout)
+    layout = self.win.ui.verticalLayout
+    self.manager = PlotManager(
+        cmisc.A(
+            w=self.win,
+            add=layout.addWidget,
+            remove=layout.removeWidget,
+        )
+    )
 
   def close_main_window(self):
     for cb in self.cleanups_cb:
       cb()
 
-  def register_cleanup_cb(self,cb):
+  def register_cleanup_cb(self, cb):
     self.cleanups_cb.append(cb)
 
   def about_to_quit(self):
-    print('about to quit kappa')
+    #print('about to quit kappa')
+    pass
 
   def create_plot(self, *args, **kwargs):
     plot = self.manager.create_plot(OpaPlot, *args, **kwargs)
@@ -876,8 +929,9 @@ class GraphHelper:
   def run(self):
 
     if self.run_in_jupyter:
+      print('LAAAAA')
       from IPython.lib.guisupport import start_event_loop_qt4
-      start_event_loop_qt4(app)
+      start_event_loop_qt4(self.app)
       return
 
     #if (sys.flags.interactive != 1) or not hasattr(QtCore, 'PYQT_VERSION'):
@@ -887,13 +941,15 @@ class GraphHelper:
         self.ipkernel.shell.set_completer_frame()
         self.ipkernel.start()
       else:
-        QtGui.QApplication.instance().exec_()
+        qt_imports.QtGui.QApplication.instance().exec_()
+
 
 def test1(ctx):
   g = GraphHelper()
-  p1 = DataSet(y=-np.array(range(10)))
+  p1 = Dataset(y=-np.array(range(10)))
   g.create_plot(plots=[p1])
   g.run()
+
 
 def main():
   ctx = Attributize()

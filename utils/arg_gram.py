@@ -88,12 +88,12 @@ class ConfParser:
     return t
 
   def t_STRING(self, t):
-    r"'([^\\']+|\\'|\\\\)*'"  # I think this is right ...
+    r"'(([^']+|\\'|\\\\)*)*'"  # I think this is right ...
     t.value = t.value[1:-1]
     return t
 
   def t_STRING2(self, t):
-    r'"([^\\"]+|\\"|\\\\)*"'  # I think this is right ...
+    r'"([^"]+|\\"|\\\\)*"'  # I think this is right ...
     t.value = t.value[1:-1]
     return t
 

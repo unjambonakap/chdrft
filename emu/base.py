@@ -396,8 +396,9 @@ class Memory:
 
 class AtomMem(Memory):
 
-  def __init__(self, atom_size=4, read_atom=None, write_atom=None, **kwargs):
+  def __init__(self, atom_size=4, use_int=1, read_atom=None, write_atom=None, **kwargs):
     super().__init__(reader=self._read_impl, writer=self._write_impl, **kwargs)
+    self.use_int=use_int
     self.atom_size = atom_size
     self.read_atom = read_atom
     self.write_atom = write_atom
@@ -406,15 +407,22 @@ class AtomMem(Memory):
     res = bytearray()
     prefix = addr % self.atom_size
     for i in range(0, prefix + sz, self.atom_size):
-      res += self.read_atom(addr + i)
+      res += self.to_buf(self.read_atom(addr + i))
     return res[prefix:prefix + sz]
+
 
   def _write_impl(self, addr, content):
     assert len(content) % self.atom_size == 0
     assert addr % self.atom_size == 0
     for i in range(0, len(content), self.atom_size):
-      self.write_atom(addr + i, content[i:i + self.atom_size])
+      self.write_atom(addr + i, self.from_buf(content[i:i + self.atom_size]))
 
+  def to_buf(self, v):
+    if isinstance(v, int): return struct_helper.set(v, self.atom_size)
+    return self
+  def from_buf(self, v):
+    if self.use_int: return struct_helper.get(v, self.atom_size)
+    return v
 
 class BufMem(Memory):
 

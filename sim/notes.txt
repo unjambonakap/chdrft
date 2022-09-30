@@ -1,0 +1,4 @@
+
+BODEUL
+      SUBPNT ( Sub-observer point )
+  TIPBOD ( Transformation, inertial position to bodyfixed )

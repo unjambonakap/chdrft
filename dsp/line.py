@@ -157,7 +157,7 @@ class PlotDb:
         plot_conf.plot_pos = pos
         basename='y%s%d_%s' % (prefix, pos, yname)
 
-        ds = DataSet(y,
+        ds = Dataset(y,
                      x,
                      samp_rate=plot_conf.samp_rate,
                      name=basename,)
@@ -168,8 +168,8 @@ class PlotDb:
             ny=eval(entry, globals(), dict(x=x, y=y, ds=ds))
             ds_name = '%s_%s'%(basename, entry)
 
-            if isinstance(ny, DataSet): new_ds = ny
-            else: new_ds=DataSet(ny, x, samp_rate=plot_conf.samp_rate, name=name)
+            if isinstance(ny, Dataset): new_ds = ny
+            else: new_ds=Dataset(ny, x, samp_rate=plot_conf.samp_rate, name=name)
             print(len(new_ds.y))
             print(len(ds.y))
             new_conf = LazyConf(plot_conf)
@@ -191,7 +191,7 @@ class PlotDb:
 def extract_bitstream_2wire(clk, data, ratio=0.9, rising=1):
   clk = clk.hysteresis(ratio=ratio)
   data = data.hysteresis(ratio=ratio)
-  edges = clk.select_edge(rising=rising)
+  edges = clk.select_edge_idx(rising=rising)
   bitstream = list(data.y[edges])
   return [edges, bitstream]
 

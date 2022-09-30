@@ -50,8 +50,8 @@ class ConvEnc:
     self.il, self.ol = self.zero_state()
 
   def zero_state(self):
-    ol = np.zeros((self.n, self.my.shape[1]), dtype=int)
     il = np.zeros((self.k, self.mx.shape[2]), dtype=int)
+    ol = np.zeros((self.n, self.my.shape[1]), dtype=int)
     return il, ol
 
   def state_nbits(self):
@@ -184,13 +184,17 @@ class State:
   def __init__(self, state, score=0):
     self.state = state
     self.parent = None
-    self.score = score
     self.bscore = 0
     self.action = None
+    self.set_score(score)
+
+  def set_score(self, score):
+    self.score = score
     if score != 0:
       self.likelyhood = np.log2(score)
     else:
       self.likelyhood = None
+
 
   def add_pre(self, prev_state, trans_score, action):
     self.score = max(self.score, prev_state.score * trans_score)
@@ -203,14 +207,22 @@ class State:
       self.action = action
       self.parent = prev_state
 
+
+  @staticmethod
+  def GetKey(state):
+    v = 0
+    for st in state:
+      if isinstance(st, np.ndarray):
+        if st.size == 0: continue
+        for i in np.nditer(st):
+          v = (v << 1) | i
+      else:
+        v = (v << 1) | st
+    return v
+
   @property
   def key(self):
-    v = 0
-    for st in self.state:
-      if st.size == 0: continue
-      for i in np.nditer(st):
-        v = (v << 1) | i
-    self.__dict__['key'] = v
+    v= self.__dict__['key'] = State.GetKey(self.state)
     return v
 
 
@@ -255,7 +267,7 @@ class ConvTimeState:
     assert len(vals) > 0
     #assert tot >= 0.1
     limv = mquantiles(vals, 0.90)[0] / 3
-    #limv = 1e-9
+    limv = 1e-9
     tot = np.sum(vals)
     if tot < 1e-9: return False
 
@@ -289,12 +301,15 @@ def do_graph_reduce(g, reduce_func, vals, reverse=False):
 
 class ConvViterbi:
 
-  def __init__(self, encoder, collapse_depth=None, ans_states=None):
+  def __init__(self, encoder, collapse_depth=None, ans_states=None, ans_inputs=None, allowed_state0_limiter=None):
     self.encoder = encoder
+    self.ans_enc = ConvEnc(encoder.mx, encoder.my)
     self.states = defaultdict(lambda: ConvTimeState(self.encoder))
     self.ans_states = ans_states
+    self.ans_inputs = ans_inputs
     self.pos = 0
     self.fail = 0
+    self.allowed_state0_limiter = allowed_state0_limiter or (lambda x: True)
 
     self.collapse_depth = collapse_depth
     assert collapse_depth > 0
@@ -347,19 +362,24 @@ class ConvViterbi:
     glog.info(f'Selecting conf {conf}')
 
     dec = ConvViterbi(encoder, **kwargs)
-    for i in range(0, len(conf.data) - encoder.n + 1, encoder.n):
-      r = dec.setup_next(conf.data[i:i + encoder.n])
-      if r is not None and r.action is not None:
-        for a in r.action:
-          yield a
+    return self.feed(conf.data)
 
 
-  def feed(self, data):
+  def feed(self, data, finish=True):
     res = []
     for i in range(0, len(data)-self.encoder.n+1, self.encoder.n):
       r = self.setup_next(data[i:i+self.encoder.n])
       if r is not None and r.action is not None:
         res.extend(r.action)
+
+
+    if finish:
+      for i in range(self.collapse_depth):
+        r = self.setup_next(np.ones(self.encoder.n) * 0.5)
+        if r is not None and r.action is not None:
+          res.extend(r.action)
+
+
     return res
 
 
@@ -379,9 +399,13 @@ class ConvViterbi:
       n = np.product(s0.state[0].shape)
       ax = np.reshape(np.array(cnd[:n]), s0.state[0].shape)
       ay = np.reshape(np.array(cnd[n:]), s0.state[1].shape)
-      s = State([ax, ay], 1 / (2**nb))
+      s = State([ax, ay], 0)
+      if not self.allowed_state0_limiter(s): continue
       self.states[self.pos].get_state(s)
-    for k, v in self.states[self.pos].states.items():
+    s0 = self.states[self.pos].states
+    prob = 1/len(s0)
+    for k, v in s0.items():
+      v.set_score(prob)
       self.g.add_node((self.pos, k))
       self.nodes_at_depth[self.pos].add(k)
 
@@ -398,8 +422,14 @@ class ConvViterbi:
     cur = self.states[pp]
     cur.transition(self.nodes_at_depth[pp], nstate, obs)
 
-    if self.ans_states:
+    if self.ans_states is not None:
       k0 = self.ans_states[p]
+      print(k0)
+      print(nstate.states.keys())
+      print('ANSSS ', nstate.states[k0].score)
+    elif self.ans_inputs is not None and pp < len(self.ans_inputs):
+      r = self.ans_enc.next([self.ans_inputs[pp]])
+      k0 = State.GetKey(self.ans_enc.il)
       print('ANSSS ', nstate.states[k0].score)
 
     if not nstate.finalize():
@@ -421,6 +451,9 @@ class ConvViterbi:
     if collapse_at < 0: return
     self.do_collapse(collapse_at, p)
     assert collapse_at in self.output
+    o = self.output[collapse_at]
+    print(o.key, o.score, o.state)
+
     return self.output[collapse_at]
 
   def do_collapse(self, collapse_at, p):
@@ -434,7 +467,9 @@ class ConvViterbi:
         assert (p, x) in self.g
         scores[(p, x)] = s.score
       # backpropagating scores
+      mstate = self.states[p].states[max(scores, key=lambda x: scores[x])[1]]
       do_graph_reduce(self.g, max, scores, reverse=True)
+
 
     for k in list(rem_at):
       tmp.append((self.states[collapse_at].states[k].score, k))
@@ -451,6 +486,8 @@ class ConvViterbi:
     if len(cd) == 1:
       x = self.states[depth].states[k]
       self.output[depth] = x
+      print('sel ', x.state, x.score)
+
     cur = (depth, k)
 
     preds = list(self.g.predecessors(cur))

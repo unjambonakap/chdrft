@@ -1,0 +1,18 @@
+MAIN=map9v3
+LEF_FILE=/home/benoit/opts/vlsi/share/qflow/tech/osu035/osu035_stdcells.lef
+GDS_FILE=osu035_stdcells.gds2
+
+synth:
+	qflow synthesize ${MAIN}
+
+place: synth
+	qflow place ${MAIN}
+
+route: place
+	qflow route ${MAIN}
+
+gds: route
+	bash ./genere_gds.sh
+
+
+build: Makefile gds

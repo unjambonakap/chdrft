@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 
-from chdrft.utils.misc import Attributize, is_python2, cwdpath, csv_list
 import types
+import inspect
 
 def ListInput(x):
   if isinstance(x, list): return x
@@ -41,6 +41,12 @@ class CmdsList:
       if isinstance(v, types.FunctionType):
         self.add(v, name=k)
     return self
+
+  def make(self, f):
+    self.add(f)
+
+
+
 
 
 Cmds = CmdsList()

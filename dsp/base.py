@@ -15,9 +15,14 @@ from chdrft.algo.viterbi import ConvViterbi, ConvEnc
 import chdrft.algo.viterbi as viterbi
 from chdrft.utils.swig import swig
 import math
+from gnuradio import digital
+digital.pfb_clock_sync_ccf
 
-m = swig.opa_math_common_swig
-c = swig.opa_crypto_swig
+try:
+  m = swig.opa_math_common_swig
+  c = swig.opa_crypto_swig
+except:
+  pass
 
 global flags, cache
 flags = None
@@ -199,6 +204,7 @@ class EasyBlock(BaseBlock):
   def __init__(self, **kwargs):
     super().__init__(**kwargs)
     self.data = None
+    self.stats = []
     self.output = []
     self.need_more = False
     self.ts = 0
@@ -283,7 +289,7 @@ class ChainBlock(EasyBlock):
   def proc(self):
     cur = self.get_buf(self.blk_size)
     if cur is None: return
-    for blk in self.blocks:
+    for i, blk in enumerate(self.blocks):
       blk.feed(cur)
       cur = blk.get()
       if not cur: break
@@ -465,10 +471,18 @@ class WhitenerBlock(EasyBlock):
 
 class TimingSyncBlock(EasyBlock):
 
-  def __init__(self, resamp_ratio=None, sps_base=None, sps_max_dev=0.1, sig=np.complex64, **kwargs):
+  def __init__(
+      self,
+      resamp_ratio=None,
+      sps_base=None,
+      sps_max_dev=0.1,
+      sig=np.complex64,
+      alpha=1 - 1e-6,
+      **kwargs,
+  ):
     super().__init__(name='timing_sync', sig=sig, **kwargs)
     self.resamp_ratio = resamp_ratio
-    self.sps = SimpleIIR(alpha=1 - 1e-6, v=sps_base, max_dev=sps_max_dev)
+    self.sps = SimpleIIR(alpha=alpha, v=sps_base, max_dev=sps_max_dev)
     self.diff_hyst = HysteresisRT(0, 1, 0.4, 0.6, 0)
     self.t = 0
     self.last = None
@@ -489,6 +503,15 @@ class TimingSyncBlock(EasyBlock):
     want = int(round(target_num))
     b = self.get_buf(want + skip - double)
     #print(skip, double, self.ts, self.sps.get(), diff, self.new_ts - self.ts, abs(diff), want)
+    self.stats.append(
+        cmisc.Attr(
+            ts=self.ts,
+            double=double,
+            skip=skip,
+            diff=diff,
+            target_num=target_num,
+        )
+    )
     if b is None: return
     if skip: b = b[1:]
     if double:
@@ -558,45 +581,22 @@ class ConvolutionalBlock(EasyBlock):
 
 class SignalBuilder:
 
-  def __init__(self, *args, dtype=np.float64, check_empty=1, **kwargs):
-    self.r = Z.Range1D(*args, is_int=1, **kwargs)
-    self.tb = np.zeros(len(self.r), dtype=dtype)
-    self.check_empty = check_empty
+  def __init__(self, *args, **kwargs):
+    self.r = Z.Range1D(*args, is_int=1)
+    self.tb = np.zeros(len(self.r), **kwargs)
 
   def add(self, pos, data):
     r2 = self.r.make_new(pos, pos + len(data))
     r2 = r2.intersection(self.r)
-    if r2.empty:
-      assert not self.check_empty
-      return
-
     self.tb[(r2 - self.r.low).window] += data[(r2 - pos).window]
-
-  def add_multiple(self, pos, data, pulse, sps):
-    for i, d in enumerate(data):
-      self.add(pos + i * sps, pulse * d)
 
   def get(self):
     return self.tb
 
-  def add_peer(self, peer):
-    self.add(peer.r.low, peer.tb)
-
-  def doppler_shift(self, f, sample_rate):
-    ft = np.arange(len(self.tb)) * (f / sample_rate * 2 * np.pi)
-    self.tb = self.tb * np.exp(1j * ft)
-
-  def extract_peer(self, peer):
-    return self.extract(peer.r.low, peer.tb)
-
   def extract(self, pos, data):
     r2 = self.r.make_new(pos, pos + len(data))
     r2 = r2.intersection(self.r)
-    print((r2-pos), (r2-pos).window)
     return data[(r2 - pos).window]
-
-  def make_new(self):
-    return SignalBuilder(self.r, dtype=self.tb.dtype, check_empty=self.check_empty)
 
 
 class DynamicNumpyArray:
@@ -747,6 +747,8 @@ def run_block(g, src_data=None, out_type=np.complex64):
     snk = blocks.vector_sink_i()
   elif out_type == np.float32:
     snk = blocks.vector_sink_f()
+  elif out_type == np.bool8:
+    snk = blocks.vector_sink_b()
   else:
     assert 0
 
@@ -764,11 +766,12 @@ def run_block(g, src_data=None, out_type=np.complex64):
         node_mapper[node] = blocks.vector_source_c(node)
       elif isinstance(node[0], complex):
         node_mapper[node] = blocks.vector_source_c(node)
+      elif isinstance(node[0], np.bool8):
+        node_mapper[node] = blocks.vector_source_b(node)
       else:
         assert 0, type(node[0])
 
     else:
-      print(node)
       node_mapper[node] = node
 
   for u, v in g.edges():
@@ -791,30 +794,81 @@ class Status(Z.Enum):
   DONE = 3
 
 
+class DbHelper:
+
+  def ampl2db(x):
+    return 20 * np.log10(np.abs(x))
+
+  def var2db(x):
+    return 10 * np.log10(np.abs(x))
+
+  def db2ampl(x):
+    return 10**(x / 20)
+
+  def db2var(x):
+    return 10**(x / 10)
+
+  def sig_power(x):
+    return DbHelper.ampl2db(np.linalg.norm(x) / len(x)**0.5)
+
+
+def get_sum_distrib(std, n):
+  return Z.stats.norm(loc=0, scale=std * (n**0.5))
+
+
+class DopplerTracker:
+
+  def __init__(self, acq=None, track=None):
+    self.acq = acq
+    self.track = track
+
+  def get_space(self, cur=None, dt=None):
+    if cur is None: return self.get_acq()
+    return self.get_track(cur=cur, dt=dt)
+
+  def get_acq(self):
+    return self.acq
+
+  def get_track(self, cur=None, dt=None):
+    if isinstance(self.track, np.ndarray):
+      return cur + self.track
+    return cur + np.arange(
+        -self.track.max_doppler_rate * dt, self.track.max_doppler_rate * dt, self.track.doppler_step
+    )
+
+
 class OpaXpsk(EasyBlock):
 
-  def __init__(self, conf, fixed_sps_mode=False, **kwargs):
+  def __init__(self, conf, **kwargs):
     super().__init__(name='xpsk', in_sig=np.complex64, out_sig=np.float32, **kwargs)
     self.conf = conf
     self.status = Status.INIT
     self.signal_data = Z.Attributize(power=0)
     self.pulse_shape = np.array(self.conf.pulse_shape)
     self.pulse_len = len(self.pulse_shape)
-    if 'jitter' not in conf: self.conf.jitter = self.conf.sps // 4
-
+    self.half_pulse_len = self.pulse_len // 2
     self.sps_int = round(self.conf.sps)
     assert abs(self.conf.sps - self.sps_int) < 0.01, 'Your sps should be very close to an integer'
+    self.pulse_t_track = np.arange(self.pulse_len +
+                                   self.conf.jitter * 2) * (2j * np.pi / self.conf.sample_rate)
 
-    self.track_proc_size = self.pulse_len + self.conf.jitter * 2
-    self.pulse_t_track = np.arange(self.track_proc_size) * (2j * np.pi / self.conf.sample_rate)
-
-    self.acq_proc_size = int(self.conf.sps * (1 + self.conf.n_acq_symbol) + len(self.pulse_shape))
+    self.acq_proc_size = int(
+        2 * self.conf.sps * (1 + self.conf.n_acq_symbol) + len(self.pulse_shape)
+    )
     self.pulse_t_acq = np.arange(self.acq_proc_size) * (2j * np.pi / self.conf.sample_rate)
     self.stats = []
     self.tracking_data = None
     self.acq_data = None
     self.need_more = None
-    self.fixed_sps_mode = fixed_sps_mode
+    self.fixed_sps_mode = self.conf.get('fixed_sps_mode', 0)
+    self.doppler_tracker = DopplerTracker(track=self.conf.track_doppler, acq=self.conf.acq_doppler)
+
+  def ts_to_s(self, ts):
+    return ts / self.conf.sample_rate
+
+  def get_doppler_shift(self, sig, doppler):
+    t_sig = np.arange(len(sig)) * (2j * np.pi / self.conf.sample_rate)
+    return sig * np.exp(t_sig * doppler)
 
   def proc(self):
     nstatus = self.process()
@@ -833,16 +887,14 @@ class OpaXpsk(EasyBlock):
       cur = self.do_track()
       if cur is None:
         return
-      if cur.snr < self.conf.SNR_THRESH:
-        return Status.ACQUISITION
+      if not self.is_cnd_ok(cur):
+        print('LOST ACQUISITION >> srn=', cur)
+        if self.conf.get('fail_on_lost_track', 0):
+          assert 0
+        if not self.conf.get('ignore_on_lost_track', 0):
+          return Status.ACQUISITION
     else:
       assert 0
-
-  def init_tracking_data(self, x):
-    self.tracking_data = x
-    self.tracking_data.sps = self.conf.sps
-    self.tracking_data.bits = []
-    self.tracking_data.b0_phase_track = []
 
   def transition(self, nstatus):
     self.status = nstatus
@@ -850,57 +902,83 @@ class OpaXpsk(EasyBlock):
       pass
     elif nstatus == Status.TRACKING:
       print('Start tracking at ', self.ts, self.new_ts)
-      self.init_tracking_data(self.acq_data)
+      self.tracking_data = self.acq_data
+      self.tracking_data.sps = self.conf.sps
+      self.tracking_data.bits = []
+      self.tracking_data.b0_phase_track = []
 
       if not self.fixed_sps_mode:
         self.sps_track.reset(self.conf.sps)
     else:
       assert 0
 
-  def analyse_chip(self, freq, data, ts, acq=1):
-    phase_shift = np.exp(1j *2*np.pi *-freq * ts / self.conf.sample_rate)
-    print(phase_shift)
+  def analyse_chip(self, freq, sig, acq=1, dbg=0, clear_sig_type2=0):
     if acq:
-      assert len(data) == self.acq_proc_size
-      shift_seq = phase_shift * np.exp(self.pulse_t_acq * -freq) * data
+      doppler_pulse = self.get_doppler_shift(self.pulse_shape, -freq)
+      doppler_angles = self.pulse_t_acq * freq
+      shift_seq = np.exp(doppler_angles) * sig
       correl = Z.signal.correlate(shift_seq, self.pulse_shape, mode='valid')
       mod = len(correl) % self.conf.sps
       if mod != 0: correl = correl[:-mod]
-      correl_abs = np.abs(correl)
-      m = np.reshape(correl_abs, (-1, self.conf.sps))
-      m, = Z.mquantiles(m, prob=[0.1], axis=0)
+      correl_max = np.max(np.abs(correl))
+      m = np.reshape(correl, (-1, self.conf.sps))
+      mquant, = Z.mquantiles(np.abs(m), prob=[0.1], axis=0)
 
-      phase0 = np.argmax(m)
+      phase0 = np.argmax(mquant)
       phase = phase0
+      qmax = mquant[phase0]
 
-      sig_offset = phase
-      skip = 2 * self.conf.sps
-      rebuild_sig = SignalBuilder(
-          sig_offset + skip,
-          sig_offset + self.conf.sps * self.conf.n_acq_symbol - skip,
-          check_empty=0
-      )
+      skip = self.conf.skip_ratio * self.conf.sps
+      startpos = phase + skip
+      endpos = min(len(sig), phase + self.conf.sps * self.conf.n_acq_symbol - skip)
+      rebuild_sig = SignalBuilder(startpos, endpos, dtype=np.complex128)
 
-      phases = np.unwrap(np.angle(correl[phase::self.conf.sps]))
+      unwrapped_phases = np.unwrap(np.angle(correl[phase::self.conf.sps]))
+      b0_phase = unwrapped_phases[-1]
+      phases = np.abs(np.diff(unwrapped_phases))
+      rebuild_sig.add(phase, self.pulse_shape)
       cur = self.pulse_shape
-      sig = 1
-      data = [sig]
-      phases_unwrap = np.diff(np.unwrap(phases))
+      sign = 1
+      data = [sign]
       for i in range(self.conf.n_acq_symbol - 1):
-        # TODO: only works for bpsk
-        if abs(phases_unwrap[i]) > np.pi / 2: sig *= -1
-        data.append(sig)
-      rebuild_sig.add_multiple(phase, data, cur, self.conf.sps)
+        if phases[i] > np.pi / 2: sign *= -1
+        data.append(sign)
+        rebuild_sig.add(phase + (i + 1) * self.conf.sps, sign * cur)
+
+      typ2_sig = None
+      if clear_sig_type2:
+        typ2_sigbuilder = SignalBuilder(startpos, endpos, dtype=np.complex128)
+        print(self.conf.sps * self.conf.n_acq_symbol, self.half_pulse_len)
+
+        for i in range(self.conf.n_acq_symbol):
+          cursig = Z.opa_struct.Range1D_int(phase + i * self.conf.sps, n=self.conf.sps).extract(sig)
+          orth_sig = Z.geo_utils.make_orth_c(cursig, doppler_pulse)
+          typ2_sigbuilder.add(phase + i * self.conf.sps, orth_sig)
+        typ2_sig = typ2_sigbuilder.get()
 
       f = rebuild_sig.get()
       f = f / np.linalg.norm(f)
       s = rebuild_sig.extract(0, shift_seq)
       snorm = s / np.linalg.norm(s)
-      proj = np.dot(f, s)
-      f = f * proj
-      noise = s - f
-      noise_db = 10 * np.log10(np.linalg.norm(noise)**2 / len(noise))
-      signal_db = 10 * np.log10(np.linalg.norm(s)**2 / len(s))
+      signal_db = DbHelper.sig_power(s)
+
+      sig_ampl = DbHelper.db2ampl(signal_db)
+      distrib = get_sum_distrib(sig_ampl, len(self.conf.pulse_shape))
+      prob_detection = 1 - (1 - distrib.cdf(qmax)) / 2
+
+      noise = Z.geo_utils.make_orth_c(s, f)
+      noise_db = DbHelper.sig_power(noise)
+
+      if 0 and dbg:
+        g = GraphHelper(run_in_jupyter=0)
+        x = g.create_plot(plots=[])
+        y = g.create_plot(plots=[])
+        x.add_plot(np.abs(f), color='r')
+        x.add_plot(np.abs(snorm), color='g')
+        x.add_plot(np.abs(noise), color='b')
+        y.add_plot(np.angle(f), color='r')
+        y.add_plot(np.angle(snorm), color='g')
+        g.run()
 
       res = cmisc.Attr(
           snr=signal_db - noise_db,
@@ -909,48 +987,44 @@ class OpaXpsk(EasyBlock):
           data=data,
           phase=phase0,
           doppler=freq,
-          sym_phases=phases,
-          b0_phase=SimpleIIR(alpha=0.9,
-                             v=np.angle(correl[phase]))  # TODO: use all bits to compute this
+          doppler_phase=doppler_angles[phase0],
+          qmax=qmax,
+          correl_max=correl_max,
+          typ2_sig=typ2_sig,
+          prob_detection=prob_detection,
+          b0_phase=SimpleIIR(alpha=self.conf.iir_b0_alpha,
+                             v=b0_phase)  # TODO: use all bits to compute this
       )
-      print('GOT PHASES ', phases)
-
-      if 0:
-        print(res)
-        g = GraphHelper(run_in_jupyter=0)
-        x = g.create_plot(plots=[])
-        y = g.create_plot(plots=[])
-        #g.create_plot(plots=[np.diff(np.unwrap(np.angle(correl[phase::self.conf.sps])))])
-        x.add_plot(np.abs(f), color='r')
-        x.add_plot(np.abs(s), color='g')
-        x.add_plot(np.abs(noise), color='b')
-        y.add_plot(np.angle(f), color='r')
-        y.add_plot(np.angle(snorm), color='g')
-        g.run()
-        assert 0
+      if dbg:
+        res.dbg = cmisc.Attr(f=f, s=s, noise=noise, shift_seq=shift_seq, m=m, mquant=mquant)
 
       return res
-
     else:
-      assert len(data) == self.track_proc_size
-      shift_seq =  phase_shift * np.exp(self.pulse_t_track * -freq) * data
+      doppler_phase = self.tracking_data.doppler_phase + 2j * np.pi * self.dt * self.tracking_data.doppler
+      doppler_angles = self.pulse_t_track * freq + doppler_phase
+      shift_seq = np.exp(doppler_angles) * sig
       correl = Z.signal.correlate(shift_seq, self.pulse_shape, mode='valid')
       assert len(correl) == self.conf.jitter * 2 + 1
       mod = len(correl) % self.conf.sps
-      signal_db = np.log10(max(1e-9, np.linalg.norm(shift_seq) / len(shift_seq)**0.5))
+      signal_db = DbHelper.sig_power(shift_seq)
       noise_db = self.tracking_data.noise_db
       phase0 = np.argmax(np.abs(correl))
       ang_at = np.angle(correl[phase0])
-      print('GOT PHASE ', ang_at)
+      qmax = np.abs(correl[phase0])
       #print(phase0, np.abs(correl), self.sps_track.get())
 
       b0_phase = self.tracking_data.b0_phase.get()
       phase_diff = Z.dsp_utils.norm_angle(ang_at - b0_phase)
 
-      noise_var = 10**(noise_db / 10)
-      correl_noise_var = np.sum(np.abs(self.pulse_shape)) * noise_var
+      noise_std = DbHelper.db2ampl(noise_db)
+      correl_noise_std = np.sum(np.abs(self.pulse_shape)) * noise_std
       #print(correl_noise_var, abs(correl[phase0]))
-      p = Z.stats.norm.cdf(abs(correl[phase0]) / correl_noise_var**0.5)
+
+      sig_ampl = DbHelper.db2ampl(signal_db)
+      distrib = get_sum_distrib(sig_ampl, len(self.conf.pulse_shape))
+      prob_detection = 1 - (1 - distrib.cdf(qmax)) / 2
+
+      p = prob_detection
       nb0_phase = ang_at
       if abs(phase_diff) < np.pi / 2:
         p = 1 - p
@@ -960,46 +1034,57 @@ class OpaXpsk(EasyBlock):
 
       return cmisc.Attr(
           snr=signal_db - noise_db,
+          ang_at=ang_at,
           noise_db=noise_db,
           signal_db=signal_db,
+          prob_detection=prob_detection,
           p=p,
+          phase_diff=phase_diff,
           phase=phase0,
+          b0_phase=b0_phase,
           nb0_phase=nb0_phase,
           doppler=freq,
-          sym_phase=ang_at,
+          doppler_phase=doppler_angles[phase0],
       )
 
   def analyse_chip_doppler_space(self, data, doppler_space, **kwargs):
     cnds = []
     for doppler_shift in doppler_space:
       cnds.append(self.analyse_chip(doppler_shift, data, **kwargs))
-    return max(cnds, key=lambda x: x.snr)
+    return max(cnds, key=lambda x: x.prob_detection)
+
+  def is_cnd_ok(self, best):
+    if self.conf.SNR_THRESH is not None and best.snr > self.conf.SNR_THRESH:
+      return 1
+
+    if self.conf.PROB_THRESH is not None and 1 - best.prob_detection < self.conf.PROB_THRESH:
+      return 1
+    return 0
 
   def do_acq(self):
     proc_ratio = 2
     want_data = self.acq_proc_size
     #cur = self.get_buf(want_data, 1 / proc_ratio)
-    cur = self.get_buf(want_data, consume_num=self.conf.sps * (1 + self.conf.n_acq_symbol))
+    cur = self.get_buf(want_data, consume_num=0)
     if cur is None: return
 
-    doppler_space = np.linspace(
-        -self.conf.max_doppler_shift,
-        self.conf.max_doppler_shift,
-        self.conf.doppler_space_size,
-    )
+    doppler_space = self.doppler_tracker.get_space()
+
     best = self.analyse_chip_doppler_space(cur, doppler_space)
+    self.consume(best.phase + self.conf.sps * self.conf.n_acq_symbol - self.conf.jitter)
     self.stats.append(dict(type='acq', best=best))
     print('TRACK BEST ', best)
-    if best.snr > self.conf.SNR_THRESH:
-      best.chip_phase = self.ts + best.phase
-      return best
+    best.chip_phase = self.ts + best.phase
+    best.chip_start = self.ts
+    if self.is_cnd_ok(best): return best
 
   def do_track(self):
+    last_chip_phase = self.tracking_data.chip_phase
     while True:
-      chip_start = self.tracking_data.chip_phase + self.tracking_data.sps - self.conf.jitter
+      chip_start = last_chip_phase + self.tracking_data.sps - self.conf.jitter
       if chip_start >= self.new_ts:
         break
-      self.tracking_data.chip_phase += self.sps_int
+      last_chip_phase += self.sps_int
 
     chip_end = chip_start + self.pulse_len + 2 * self.conf.jitter
     consume_ts = chip_start + self.tracking_data.sps - self.conf.jitter
@@ -1007,35 +1092,37 @@ class OpaXpsk(EasyBlock):
     if cur is None:
       return
 
-    doppler_space = np.linspace(
-        -self.conf.max_doppler_shift,
-        self.conf.max_doppler_shift,
-        self.conf.doppler_space_size,
-    ) + self.tracking_data.doppler
-
+    self.dt = self.ts_to_s(chip_start - self.tracking_data.chip_phase)
+    doppler_space = self.doppler_tracker.get_space(self.tracking_data.doppler, self.dt)
     best = self.analyse_chip_doppler_space(cur, doppler_space, acq=0)
+    if self.conf.get('debug_output', 0):
+      print('ANALYSE >> ', len(self.tracking_data.bits), best)
 
     nphase = chip_start + best.phase
     if not self.fixed_sps_mode:
       #print(self.sps_track.get(), nphase - self.tracking_data.chip_phase)
-      self.sps_track.push(nphase - self.tracking_data.chip_phase)
+
+      self.sps_track.push(nphase - last_chip_phase)
+      best.sps_cur = nphase - last_chip_phase
+      best.sps_track = self.sps_track.get()
+    best.ts = nphase
 
     # small timing corrections are made with SyncBlock
-    self.tracking_data.chip_phase += self.sps_int
+    self.tracking_data.chip_phase = last_chip_phase + self.sps_int
+    self.tracking_data.doppler = best.doppler
+    self.tracking_data.doppler_phase = best.doppler_phase
 
     self.stats.append(dict(type='track', best=best))
     self.tracking_data.bits.append(best.p)
     self.tracking_data.b0_phase_track.append(self.tracking_data.b0_phase.push(best.nb0_phase))
-    self.cur_output.append(best.p)
+    self.cur_output.append(best)
 
     return best
 
   def finalize(self):
     if self.tracking_data:
-      self.tracking_data.processed_bits = None
-      #TODO: check what to use for soft computation
-      # Z.DataOp.GetBPSKBits(self.tracking_data.sym_phases)
-      # self.tracking_data.bits
+      bits = np.array(self.tracking_data.bits)
+      self.tracking_data.processed_bits = np.abs(np.diff(np.unwrap(np.angle(bits))))
 
 
 def test(ctx):
@@ -1293,8 +1380,8 @@ def gen_data(ctx):
   res = []
   for b in data:
     res.extend(enc.next([b]))
-  Z.DataSet(data).to_file(ctx.origfile, 'int32')
-  Z.DataSet(res).to_file(ctx.outfile, 'int32')
+  Z.Dataset(data).to_file(ctx.origfile, 'int32')
+  Z.Dataset(res).to_file(ctx.outfile, 'int32')
 
 
 def gen1(ctx):

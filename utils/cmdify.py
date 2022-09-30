@@ -8,6 +8,8 @@ import chdrft.utils.misc as cmisc
 import pickle
 import subprocess as sp
 import glog
+import os
+import pprint
 
 if not is_python2:
   from contextlib import ExitStack
@@ -21,20 +23,30 @@ def prepare_parser(sp, cmd):
   parser = sp.add_parser(name)
   return parser
 
-
 def argparsify(parser, a):
 
-  args = inspect.getargspec(a.func)
-  typs = a.args
+  names = []
+  typs=[]
+  defaults = []
+  if a.args is None:
+    for px in inspect.signature(a.func).parameters.values():
+      names.append(px.name)
+      typs.append(px.annotation)
+  else:
+    args = inspect.getargspec(a.func)
+    names = args.args
+    typs = a.args
+    defaults = args.defaults
 
-  a2_default = args[3]
+
+  a2_default = defaults
   if not a2_default:
     a2_default = []
-  pos_default = len(args[0]) - len(a2_default)
-  a1 = args[0][:pos_default]
+  pos_default = len(names) - len(a2_default)
+  a1 = names[:pos_default]
   a1_typs = typs[:pos_default]
 
-  a2 = args[0][pos_default:]
+  a2 = names[pos_default:]
   a2_typs = typs[pos_default:]
 
   for name, typ in zip(a1, a1_typs):
@@ -51,7 +63,8 @@ def argparsify(parser, a):
     parser.add_argument('--%s' % name, type=typ, default=default)
 
   def do_call(data):
-    data = {x: vars(data)[x] for x in args[0]}
+    vd = vars(data)
+    data = {x: vd[x] for x in names}
     res = a.func(**data)
     if res is not None:
       print(res)
@@ -141,6 +154,9 @@ class ActionHandler:
     parser.add_argument('--noaction_log_output', action='store_true')
     parser.add_argument('--noctrlc_trace', action='store_true')
     parser.add_argument('--ret_syscode', action='store_true')
+    parser.add_argument('--no-local-db', action='store_true')
+    parser.add_argument('--local-db-file', type=str, default='.chdrft.db.pickle')
+
     self.args = None
     self.kwargs = None
     self.flags = None
@@ -154,8 +170,24 @@ class ActionHandler:
     from chdrft.utils.path import FileFormatHelper
     mode = None
 
+
     if len(self.args) == 1 and isinstance(self.args[0], Attributize):
-      self.args[0].update(vars(self.flags))
+      ctx = self.args[0]
+      for k, v in vars(self.flags).items():
+        if k not in ctx:
+          ctx[k] = v
+
+      from chdrft.utils.path import FileFormatHelper
+      if not flags.no_local_db and os.path.exists(flags.local_db_file):
+        try:
+          tmp = FileFormatHelper.Read(flags.local_db_file)
+          tmp.update(ctx)
+          ctx = tmp
+        except:
+          pass
+
+      self.args[0] = ctx
+
     if self.init: self.init(*self.args)
 
     if flags.action_output_file:
@@ -163,7 +195,6 @@ class ActionHandler:
         output_file = FileFormatHelper(filename=flags.action_output_file, write=True)
         stack.enter_context(output_file)
     try:
-      assert len(self.main_actions) > 0
       for action in self.main_actions:
         res = self.execute_action(action)
         if output_file:
@@ -176,10 +207,12 @@ class ActionHandler:
     except KeyboardInterrupt as e:
       if flags.noctrlc_trace: pass
       else: raise e
+    if not flags.no_local_db:
+      FileFormatHelper.Write(flags.local_db_file, ctx)
 
   def proc(self, flags, caller_ctx, *args, **kwargs):
     self.caller_ctx = caller_ctx
-    self.args = args
+    self.args = list(args)
     self.kwargs = kwargs
     self.flags = flags
 
@@ -193,6 +226,7 @@ class ActionHandler:
 
     for action in self.cleanup_actions:
       self.execute_action(action)
+
 
   def reqs(self, flags):
     self.flags = flags
@@ -237,9 +271,9 @@ class ActionHandler:
     ActionHandler.g_handler = ActionHandler(*args, **kwargs)
 
   @staticmethod
-  def Run(*args, **kwargs):
+  def Run(*args, parent_frame_n=0, **kwargs):
     from chdrft.main import app
-    _, caller_ctx = cmisc.get_n2_locals_and_globals()
+    _, caller_ctx = cmisc.get_n2_locals_and_globals(n=parent_frame_n)
     ActionHandler.g_handler.proc(app.flags, caller_ctx, *args, **kwargs)
 
   @staticmethod

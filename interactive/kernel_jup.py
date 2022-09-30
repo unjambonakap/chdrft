@@ -9,6 +9,7 @@ import os
 import os.path
 import re
 
+from jupyter_core.paths import jupyter_runtime_dir, jupyter_path
 from ipykernel.kernelapp import IPKernelApp
 from notebook.services.kernels.kernelmanager import MappingKernelManager
 from jupyter_client.kernelspec import KernelSpecManager, KernelSpec, NoSuchKernel
@@ -20,21 +21,29 @@ from collections import defaultdict
 from ipykernel.ipkernel import IPythonKernel
 import uuid
 from ipython_genutils.py3compat import unicode_type
+from jupyter_client.manager import KernelManager
 
 from jupyter_client.ioloop import IOLoopKernelManager
 
 from traitlets import default, Integer, Unicode, Instance
 import json
 
+
+class Object(object):
+  pass
+
+
 kRunId = 'runid'
 kDate = 'date'
 kData = 'data'
+kPid = 'pid'
 kKernelFile = 'kernel_file'
 kNamePrefix = 'kernel_'
 
+
+
 class OpaEntryKernelManager(MappingKernelManager):
   caller_kid = Integer(config=True, default_value=-1)
-
 
   def __init__(self, *args, **kwargs):
     super().__init__(*args, **kwargs)
@@ -57,8 +66,12 @@ class OpaEntryKernelManager(MappingKernelManager):
       if self.kernel_spec_manager:
         constructor_kwargs['kernel_spec_manager'] = self.kernel_spec_manager
 
-      km = OpaKernelManager(parent=self, log=self.log, kernel_name=kernel_name,
-                  **constructor_kwargs ,)
+      km = OpaKernelManager(
+          parent=self,
+          log=self.log,
+          kernel_name=kernel_name,
+          **constructor_kwargs,
+      )
       km.kernel_spec_manager = OpaKernelSpecManager(parent=self.parent)
       km.start_kernel(**kwargs)
       self._kernels[kernel_id] = km
@@ -71,6 +84,15 @@ class OpaEntryKernelManager(MappingKernelManager):
 
   def restart_kernel(self, kernel_id=None):
     assert 0
+
+  def shutdown_kernel(self, kernel_id, now=False, restart=False):
+    try:
+      super().shutdown_kernel(kernel_id, now, restart)
+    except:
+      print('failed to shutdown normally')
+      self._kernel_connections.pop(kernel_id, None)
+
+
 #loop.remove_timeout(timeout)
 #kernel.remove_restart_callback(on_restart_failed, 'dead')
 #    def finish():
@@ -111,43 +133,49 @@ class OpaEntryKernelManager(MappingKernelManager):
     print('KERNEL LIST >> ', res)
     return res
 
+def norm_date(date):
+  if date.endswith('0Z'): date=date[:-2]
+  return datetime.datetime.fromisoformat(date)
+def list_kernels(connection_dir):
+  kv = {}
+  kernels_by_runid = defaultdict(lambda: {kDate: datetime.datetime.min})
+  conn_fnames = glob.glob(f'{connection_dir}/kernel-*.json')
+  for conn_fname in conn_fnames:
+    with open(conn_fname, 'r') as f:
+      con = json.load(f)
+      if not kRunId in con: continue
+      con[kDate] = norm_date(con[kDate])
+      con[kKernelFile] = conn_fname
+      print(con)
+      con['filename'] = conn_fname
+      runid = con[kRunId]
+      if kernels_by_runid[runid][kDate] < con[kDate]:
+        kernels_by_runid[runid] = con
+
+  for runid, kernel in kernels_by_runid.items():
+    kernel[kDate] = kernel[kDate].isoformat()
+    kernel[kRunId] = runid
+    name = f'{kNamePrefix}{runid}'
+    kv[name] = kernel
+  return kv
+
 
 class OpaKernelSpecManager(KernelSpecManager):
 
+  conn_dir = Unicode(config=True, default_value=jupyter_runtime_dir())
   def __init__(self, *args, **kwargs):
     super().__init__(*args, **kwargs)
 
-
   @property
   def mod_kernels(self):
-    kv = {}
-    kernels_by_runid = defaultdict(lambda: {kDate:datetime.datetime.min})
-    connection_dir = self.parent.kernel_manager.connection_dir
-
-    conn_fnames = glob.glob(f'{connection_dir}/kernel-*.json')
-    for conn_fname in conn_fnames:
-      with open(conn_fname, 'r') as f:
-        con = json.load(f)
-        if not kRunId in con: continue
-        con[kDate] = datetime.datetime.fromisoformat(con[kDate])
-        con[kKernelFile] = conn_fname
-        runid = con[kRunId]
-        if kernels_by_runid[runid][kDate] < con[kDate]:
-          kernels_by_runid[runid] = con
-
-
-    for runid, kernel in kernels_by_runid.items():
-      kernel[kDate] = kernel[kDate].isoformat()
-      kernel[kRunId] = runid
-      name = f'{kNamePrefix}{runid}'
-      kv[name] = kernel
-    return kv
+    print('LIsting at ', self.conn_dir)
+    return list_kernels(self.conn_dir)
 
   def get_all_specs(self):
     res = super().get_all_specs()
 
     for name, kernel in self.mod_kernels.items():
-      res[name] = dict(spec={'display_name':name, kData:kernel}, resource_dir='')
+      res[name] = dict(spec={'display_name': name, kData: kernel}, resource_dir='')
 
     return res
 
@@ -178,23 +206,40 @@ class OpaKernelApp(IPKernelApp):
     with open(cf, 'r+') as f:
       con = json.load(f)
       f.seek(0)
-      con['date'] = datetime.datetime.now().isoformat()
-      con['runid'] = self.runid
+      con[kPid] = os.getpid()
+      con[kDate] = datetime.datetime.now().isoformat()
+      con[kRunId] = self.runid
       json.dump(con, f, indent=2)
       f.truncate()
+
+
+class FakeKernel:
+  def __init__(self, pid):
+    self.pid = pid
+
+  def send_signal(self, signum):
+    pass
 
 class OpaKernelManager(IOLoopKernelManager):
 
   def __init__(self, *args, **kwargs):
     super().__init__(*args, **kwargs)
 
+  def start_restarter(self):
+    print('gogo restart')
+    super().start_restarter()
+
   def start_kernel(self, **kw):
     self.start_restarter()
+    print('starting kernel')
     print(self.kernel_spec_manager.get_kernel_spec)
     print(self.kernel_spec_manager.get_kernel_spec(self.kernel_name))
-    print(self.kernel_spec)
+    print(self.kernel_spec.metadata)
     self.load_connection_file(self.kernel_spec.metadata[kKernelFile])
+
     self._connect_control_socket()
+    info = self.kernel_spec.metadata
+    self.kernel = FakeKernel(info.get(kPid, -1))
 
   def request_shutdown(self, restart=False):
     pass
@@ -205,3 +250,41 @@ class OpaKernelManager(IOLoopKernelManager):
   def cleanup(self, connection_file=True):
     self.cleanup_ipc_files()
     self._close_control_socket()
+
+
+class OpaConsoleKernelManager(KernelManager):
+
+  def __init__(self, *args, **kwargs):
+    super().__init__(*args, **kwargs)
+    self._opa_kernel = OpaKernelSpecManager(data_dir=self.data_dir, parent=self)
+
+  @property
+  def kernel_spec(self):
+    if self._kernel_spec is None and self.kernel_name != '':
+      self._kernel_spec = self._opa_kernel.get_kernel_spec(self.kernel_name)
+    return self._kernel_spec
+
+
+#from ipykernel.eventloops import register_integration
+#class MyKernel:
+#  def __init__(self):
+#    self.app = None
+#    self.cnt = 0
+#  def run(self, kernel):
+#    if self.app is not None:
+#      print('Refresh here')
+#      K.vispy_utils.vispy.app.process_events()
+#    kernel.do_one_iteration()
+#  def __call__(self, kernel):
+#    self.run(kernel)
+#
+#mk = MyKernel()
+#register_integration('mykernel')(mk)
+
+# % gui my_kernel
+
+# get_ipython() # -> available from locals
+
+#from traitlets.config.application import Application
+#kernel = Application.instance().kernel
+#print(kernel.__dict__.keys())

@@ -1,82 +1,95 @@
 #!/usr/bin/env python
 
+import logging
 
-from chdrft.cmds import CmdsList
-from chdrft.main import app
-from chdrft.utils.cmdify import ActionHandler
-from chdrft.utils.misc import Attributize
-import chdrft.utils.misc as cmisc
-import glog
-from chdrft.struct.base import Intervals, get_primitive_ranges, Range1D
-import glob
-import re
-import os.path
-from chdrft.interactive.base import create_kernel
+#import chdrft.utils.lazy import do_lazy_import
+#
+#do_lazy_import(__file__)
+
+import math
+from asq.initiators import query as asq_query
+
 from collections import defaultdict, deque
-from chdrft.tools.xxd import xxd
-import binascii
-import struct
-import codecs
+from contextlib import ExitStack
+from enum import Enum
+from math import nan
+from math import pi
+from matplotlib import cm
+from pprint import pprint
+from queue import Queue
+try:
+  from queue import SimpleQueue
+except: pass
 import base64
+import binascii
+import codecs
+import csv
+import ctypes
+import curses.ascii
+import glob
+import glog
 import gmpy2
-from chdrft.tube.connection import Connection
-from chdrft.tube.process import Process
-from chdrft.tube.serial import SerialFromProcess, Serial
-from chdrft.tube.file_like import FileLike, FileTube
-import requests
-import traceback as tb
+import heapq
+import io
+import itertools
+import math
+import multiprocessing
+import networkx as nx
+import numpy as np
+import os.path
+import pandas as pd
+import pickle
 import random
-import time
-from chdrft.utils.fmt import Format
-from chdrft.utils.path import FileFormatHelper
-from chdrft.utils.arg_gram import LazyConf
-import tempfile
+import re
+import requests
 import shutil
 import socket
-import csv
-import pickle
-import numpy as np
-from pprint import pprint
-import pandas as pd
-import io
-from asq.initiators import query as asq_query
-import curses.ascii
-from contextlib import ExitStack
-from chdrft.emu.elf import ElfUtils
-import Crypto.Hash.MD5 as MD5
-import itertools
-import Crypto.Cipher.AES as AES
-from Crypto.Util.Padding  import unpad, pad
-import chdrft.crypto.common as ccrypto
-from chdrft.gen.types import  g_types_helper
+import struct
 import subprocess as sp
-from scipy import fftpack
-from scipy import optimize
-from scipy import signal
-from scipy import cluster
-from scipy import stats
-from scipy.stats.mstats import mquantiles
-from chdrft.utils.swig import swig, swig_unsafe
-from chdrft.display.utils import DataOp, DataFile, DataSet, DynamicDataset
-import chdrft.display.utils as dsp_utils
-import matplotlib.pyplot as plt
-from enum import Enum
-import chdrft.conv.utils as conv_utils
-import math
-from math import pi
-from math import nan
-import networkx as nx
-from chdrft.utils.colors import ColorPool
-from chdrft.utils.opa_string import FuzzyMatcher, lcs, min_substr_diff
-from scipy.cluster.vq import kmeans, whiten
+import tempfile
 import threading
-from chdrft.utils.cache import Cachable
-import ctypes
+import time
+import traceback as tb
 import wrapt
-from chdrft.dbg.gdbdebugger import GdbDebugger, launch_gdb
-import multiprocessing
-from chdrft.emu.trace import Tracer, Display, WatchedMem, WatchedRegs
-from queue import Queue
+import shapely.ops as geo_ops
+import shapely.geometry as geometry
+import functools
+
+
+
+
+
+from chdrft.cmds import CmdsList
+from chdrft.dsp.cv_utils import to_grayscale
+from chdrft.interactive.base import create_kernel
+from chdrft.main import app
+from chdrft.struct.base import Intervals, get_primitive_ranges, Range1D, Range2D, Box, g_unit_box, g_one_box, GenBox
+from chdrft.tools.xxd import xxd
+from chdrft.utils.arg_gram import LazyConf
+from chdrft.utils.cache import Cachable
+from chdrft.utils.cmdify import ActionHandler
+from chdrft.utils.colors import ColorPool, ColorMapper
+from chdrft.utils.fmt import Format
+from chdrft.utils.geo import Line, smallest_circle
+from chdrft.utils.geo import to_shapely
+from chdrft.utils.math import MatHelper, deg2rad, rad2deg
+from chdrft.utils.misc import Attributize, failsafe
+from chdrft.utils.opa_string import FuzzyMatcher, lcs, min_substr_diff
+from chdrft.utils.path import FileFormatHelper
+from chdrft.utils.swig import swig, swig_unsafe
+import chdrft.conv.utils as conv_utils
+import chdrft.crypto.common as ccrypto
+import chdrft.display.utils as dsp_utils
+import chdrft.graph.base as graph_base
+import chdrft.math.sampling as opa_sampling
+import chdrft.struct.base as opa_struct
+import chdrft.utils.cache as opa_cache
+import chdrft.utils.geo as geo_utils
+import chdrft.utils.math as opa_math
+import chdrft.utils.misc as cmisc
+
+
+
 
 np.set_printoptions(edgeitems=30, linewidth=120,
     formatter=dict(float=lambda x: "%.03f" % x))

@@ -1,0 +1,352 @@
+
+%gui qt4
+from PyQt4 import QtGui, QtCore, QtSvg
+init_jupyter()
+import georinex as gr
+import ppp_tools.gpstime
+import chdrft.utils.misc as cmisc
+from chdrft.config.env import g_env
+g_env.set_qt5(0)
+from chdrft.display.vtk import vtkMain
+import chdrft.display.vtk as opa_vtk
+import  scipy.constants as constants
+import chdrft.utils.K as K
+from chdrft.geo.satsim import TileGetter
+import mercantile
+import pymap3d
+from geopy.geocoders import Nominatim
+import cv2
+
+tg = TileGetter()
+
+app.exit_jup()
+
+nav = gr.load('../../../dsp/gps/brdc3640.15n')
+nav = gr.load('/home/benoit/Downloads/brdc1850.19n')
+
+import datetime
+import time
+from astropy import constants as const
+
+from astropy.coordinates.earth import OMEGA_EARTH
+class Ephemerid:
+  def __init__(self, s):
+    self.s = s
+    self.a = s['sqrtA'] ** 2
+    
+  @property
+  def utc(self):
+    time_utc= ppp_tools.gpstime.UTCFromGps(self.s['GPSWeek'], self.s['Toe'])
+    time_utc = list(time_utc)
+    time_utc[-1] = int(time_utc[-1])
+    return datetime.datetime(*time_utc)
+
+  
+  def get_pos(self, t):
+    
+    dt = t -  self.utc
+    dt_sec =dt.total_seconds()
+    print('DT >>> ', dt)
+    
+    sv =self.s
+    
+    n0 = np.sqrt(const.GM_earth.value/self.a**3)  # computed mean motion
+#    T = 2*pi / n0  # Satellite orbital period
+    omega_e = OMEGA_EARTH.value
+
+    n = n0 + sv['DeltaN']
+    e = sv['Eccentricity']
+# %% Kepler's eqn of eccentric anomaly
+    Mk = sv['M0'] + n*dt_sec  # Mean Anomaly
+    Ek = Mk + e * np.sin(Mk)  # Eccentric anomaly
+# %% true anomaly
+    nuK = np.arctan2(np.sqrt(1 - e**2) * np.sin(Ek),
+                     np.cos(Ek) - e)
+# %% latitude
+    PhiK = nuK + sv['omega'] # argument of latitude
+    duk = sv['Cuc'] * np.cos(2*PhiK) + sv['Cus']*np.sin(2*PhiK)  # argument of latitude correction
+    uk = PhiK + duk  # corred argument of latitude
+# %% inclination (same)
+    dik = sv['Cic']*np.cos(2*PhiK) + sv['Cis']*np.sin(2*PhiK)  # inclination correction
+    ik = sv['Io'] + sv['IDOT']*dt_sec + dik  # corrected inclination
+# %% radial distance (same)
+    drk = sv['Crc'] * np.cos(2*PhiK) + sv['Crs'] * np.sin(2*PhiK)  # radial correction
+    rk = self.a * (1 - e * np.cos(Ek)) + drk  # corrected radial distance
+# %% right ascension  (same)
+    OmegaK = sv['Omega0'] + (sv['OmegaDot'] - omega_e)*dt_sec - omega_e*sv['Toe']
+# %% transform
+    Xk1 = rk * np.cos(uk)
+    Yk1 = rk * np.sin(uk)
+
+    X = Xk1 * np.cos(OmegaK) - Yk1 * np.sin(OmegaK) * np.cos(ik)
+
+    Y = Xk1*np.sin(OmegaK) + Yk1 * np.cos(OmegaK) * np.cos(ik)
+
+    Z = Yk1*np.sin(ik)
+    return X,Y,Z
+
+
+import math
+def ecef_to_latlng(x,y,z):
+  lng = math.atan2(y,x)
+  lat = math.atan2(z, np.linalg.norm((x,y)))
+  return Z.rad2deg(np.array((lat, lng)))
+
+def analyse_sat(sat):
+  tmp = nav.sel(sv=sat)
+  df = tmp.to_dataframe().dropna()
+  last = df.iloc[-1]
+  a = Ephemerid(last)
+
+  now = datetime.datetime(2015, 12, 30, 22)
+  now = datetime.datetime.utcnow()
+  xyz= a.get_pos(now)
+  print(xyz)
+  res = ecef_to_latlng(*xyz)
+  print(res)
+  return res
+
+for val in nav['sv'].values:
+  print('\n\n>>>', val)
+  analyse_sat(val)
+
+gr.keplerian2ecef(tmp)
+
+from astroquery.jplhorizons import Horizons
+obj = Horizons(id='Earth', location='568',
+epochs={'start':'2010-01-01', 'stop':'2010-03-01',
+'step':'10d'})
+eph = obj.ephemerides()
+
+import calcephpy
+from astroquery.jplhorizons import Horizons
+
+start = '1969-07-16 16:40'
+end = '1969-07-28'
+start = '2018-01-01'
+end = '2018-01-5'
+body_center = calcephpy.NaifId.MARS
+body_a = calcephpy.NaifId.PHOBOS
+body_b = calcephpy.NaifId.DEIMOS
+body_b =-399110
+body_a = calcephpy.NaifId.MOON
+objs = []
+
+bodies = [calcephpy.NaifId.DEIMOS, calcephpy.NaifId.PHOBOS, -3, -41, -74, ]
+body_center = calcephpy.NaifId.MARS
+for body in bodies:
+  objs.append(Horizons(id=body,
+                 location=f'@{body_center}',
+                 epochs={'start':start,
+                         'stop':end,
+                         'step':'1h'},
+                 id_type='majorbody'))
+
+
+
+from astropy.coordinates import SkyCoord
+from astropy.coordinates import ICRS
+def eph_to_xyz(eph):
+  a = SkyCoord(eph['RA'], eph['DEC'], distance=eph['delta'], frame='icrs')
+  return a.cartesian.xyz.value.T
+
+import chdrft.utils.K as K
+
+%gui qt4
+
+main = vtkMain()
+
+
+for obj in objs:
+  pts = eph_to_xyz(obj.ephemerides())
+  actor = opa_vtk.create_line_actor(pts)
+  main.ren.AddActor(actor)
+
+sp = opa_vtk.SphereActor(1e-5, 10, (0,0,0), K.vispy_utils.Color('y').rgb)
+main.ren.AddActor(sp)
+
+main.run()
+
+main.app.quit()
+
+from sbpy.data import Orbit
+from astropy.time import Time
+epoch = Time('2018-05-14', scale='utc')
+eph = Orbit.from_horizons('Ceres', epochs=epoch)
+
+epoch2 = Time('2018-05-15', scale='utc')
+eph2 = eph.oo_propagate(epoch2)
+
+
+import pyoorb as oo
+oo.pyoorb.oorb_init()
+from sbpy.data import Orbit
+from astropy.time import Time
+epoch = Time.now().jd + 100
+ceres = Orbit.from_horizons('Ceres')      # doctest: +REMOTE_DATA
+future_ceres = ceres.oo_propagate(epoch)  # doctest: +SKIP
+print(future_ceres)  # doctest: +SKIP
+
+cart = eph2.oo_transform('CART')
+
+cart['x']
+
+for i in range(10):
+  print(a[i].cartesian.x)
+
+type(elems[0])
+
+import reverse_geocoder as rg
+coordinates = (51.5214588,-0.1729636),(9.936033, 76.259952),(37.38605,-122.08385)
+
+results = rg.search(coordinates) # default mode = 2
+
+print(results)
+
+gl = Nominatim(user_agent='VGYV7gGlNoWapA==')
+obj = gl.geocode('Paris')
+tile = mercantile.tile(obj.longitude, obj.latitude, 12)
+
+from chdrft.utils.cache import global_cache_list
+global_cache_list
+
+tx = tg.get_tile(*tile)
+img = K.opa_vtk.read_img_from_buf(tx)
+
+K.vispy_utils.render_for_meshes([cmisc.Attr(images=[img[::-1]])])
+#K.plot_img(img[::-1])
+
+open('/tmp/test.png', 'wb').write(tx)
+
+img = cv2.imread('/tmp/test.png', 1)
+
+print(img.shape)
+
+#img_vtk = K.opa_vtk.numpy_to_vtk_image(np.ascontiguousarray(img[:,:,0]))
+img_vtk = K.opa_vtk.numpy_to_vtk_image(np.ascontiguousarray(img.reshape((1,) + img.shape)))
+tex = K.opa_vtk.reader2tex(img_vtk)
+#tex = K.opa_vtk.jpeg2tex('/tmp/test.png')
+
+actor= K.opa_vtk.TriangleActor(tex=tex).full_quad(Z.opa_struct.g_unit_box.poly(z_coord=1)).build()
+
+main = vtkMain()
+main.ren.AddActor(actor)
+main.run()
+
+class Consts:
+  EARTH_A = 6378137
+  EARTH_B = 6356752.3142
+  EARTH_ELLIPSOID = pymap3d.Ellipsoid('wgs84')
+  
+class TMSQuad:
+  LMAX=85.05113
+  MAX_DEPTH=20
+  
+  def __init__(self, x, y, z):
+    self.x = x
+    self.y = y
+    self.z = z
+    self._children = None
+    
+  @property
+  def children(self):
+    if self._children is None:
+      self._children = []
+      if self.z +1 < TMSQuad.MAX_DEPTH:
+        for i in range(4):
+          self._children.append(TMSQuad(2*self.x+(i&1), 2*self.y+(i>>1), self.z+1))
+    return self._children
+  
+  def __iter__(self):
+    return iter(self.children)
+  
+  @property
+  def box_latlng(self):
+    bounds = mercantile.bounds(*self.xyz)
+    box = Z.Box(low=(bounds.west, bounds.south), high=(bounds.east, bounds.north))
+    return box
+    
+  @property
+  def quad_ecef(self):
+    p = self.box_latlng.poly()
+    return Z.opa_struct.Quad(np.stack(pymap3d.geodetic2ecef(p[:,1], p[:,0], 0, ell=Consts.EARTH_ELLIPSOID), axis=-1))
+  
+  @property
+  def xyz(self):
+    return self.x, self.y, self.z
+  
+  def tile(self, tg):
+    return tg.get_tile(*self.xyz)
+  
+  @staticmethod
+  def Root():
+    return TMSQuad(0,0,0)    
+  
+  
+def do_visit(obj, func):
+  if func(obj):
+    for x in obj:
+      do_visit(x, func)
+
+
+main = vtkMain()
+
+def visit(obj):
+  if obj.z < 2: return 1
+  tx = obj.tile(tg)
+  img = K.opa_vtk.read_img_from_buf(tx)
+  actor = opa_vtk.TriangleActor(tex=K.opa_vtk.numpy2tex(img)).full_quad_yinv(obj.quad_ecef).build()
+  main.ren.AddActor(actor)
+  return 0
+  
+root = TMSQuad.Root()
+do_visit(root, visit)
+
+main.run()
+
+print(main.ren.GetActiveCamera().GetViewAngle())
+print(main.ren.GetActiveCamera().GetPosition())
+
+def make_norm(a):
+  return a / np.linalg.norm(a)
+def make_orth_norm(a, b):
+  return make_norm(a - np.dot(a, make_norm(b)))
+
+def compute_angle(center, focal_point, up, pt):
+  center, focal_point, up, pt = cmisc.to_numpy_args(center, focal_point, up, pt)
+  single_pt = len(pt.shape) == 1
+  pt =pt.reshape((-1, 3))
+  
+  dpt = pt - center
+  dfocal = focal_point - center
+  dfocal_len = np.linalg.norm(dfocal)
+  z = dfocal / dfocal_len
+  
+  y = make_orth_norm(up, z)
+  x = np.cross(y, z)
+  pt_len = np.linalg.norm(dpt)
+  dproj = np.dot(dpt, z)
+  ang_x = np.arctan2(np.dot(dpt, x), dproj)
+  ang_y = np.arctan2(np.dot(dpt, y), dproj)
+  res = np.stack((ang_x, ang_y), axis=-1)
+  if single_pt: return res[0]
+  return res
+
+
+def compute_cam_parameters(center, focal_point, up, pts, expand=0.05, aspect=None):
+  angles = compute_angle(center, focal_point, up, pts)
+  print(angles)
+  box = Z.Box.FromPoints(pts).center_on(np.zeros((2,)))
+  box =box.expand(1 + expand)
+  if aspect is not None:
+    b1 = box.set_aspect(aspect)
+    box = box.force_aspect(aspect)
+    print(b1, box)
+  return box
+    
+
+  
+res =compute_cam_parameters((0, 0, 0), (0,0, 1), (0, 1, 0), [(1, 1, 1), (1,1,2)])
+print(res)
+
+app.exit_jup()

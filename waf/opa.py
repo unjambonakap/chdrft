@@ -22,6 +22,7 @@ import sys
 from chdrft.main import app
 import chdrft.utils.path as opa_paths
 import waflib.Tools.cxx
+import subprocess as sp
 
 pindir = opa_paths.PinDir('')
 pin_link_args = [
@@ -288,6 +289,11 @@ class WafGDAL(WafPkg):
   def __init__(self):
     super().__init__('gdal')
 
+class WafQI(WafPkg):
+
+  def __init__(self):
+    super().__init__('qi')
+
 
 class WafGlew(WafPkg):
 
@@ -299,6 +305,11 @@ class WafGlm(WafPkg):
 
   def __init__(self):
     super().__init__('glm')
+
+class WafQgis(WafPkg):
+
+  def __init__(self):
+    super().__init__('qgis')
 
 
 class WafGLU(WafPkg):
@@ -331,7 +342,7 @@ class WafOpenSSL(WafPkg):
 class WafOpenCV(WafPkg):
 
   def __init__(self):
-    super().__init__('opencv4')
+    super().__init__('opencv-noviz')
 
 
 class WafZeroMQ(WafPkg):
@@ -349,7 +360,7 @@ class WafGflags(WafPkg):
 class WafGlog(WafPkg):
 
   def __init__(self):
-    super().__init__('glog')
+    super().__init__('libglog')
 
 
 class WafProtobuf(WafPkg):
@@ -433,10 +444,10 @@ class WafProtoc(WafBasePkg):
     ctx.env.PROTOC_ST = '-I%s'
 
 
-class WafPoco(WafPkg):
+class WafAbsl(WafPkg):
 
   def __init__(self):
-    super().__init__('PocoFoundation')
+    super().__init__('absl_any')
 
 
 class WafPkgList:
@@ -493,14 +504,16 @@ class WafPackages:
   Glm = WafGlm()
   Glew = WafGlew()
   GDAL = WafGDAL()
+  #QI = WafQI()
   png = Wafpng()
   Asmjit = WafAsmjit()
-  PocoFoundation = WafPoco()
+  Absl = WafAbsl()
   GRC = WafGRC()
   Uhd = WafUhd()
   YamlCPP = WafYamlCPP()
   Lemon = WafLemon()
   CGAL = WafCGAL()
+  Qgis = WafQgis()
   #dwf = WafDwf()
 
 
@@ -1480,7 +1493,7 @@ class WafBuilder:
 
   def auto_swig(self):
     srcs = opa_waf.get_swig(self.path)
-    #print('FIND >> ', self.path, srcs)
+    print('FIND >> ', self.path, srcs)
     if len(srcs) == 0:
       return []
 
@@ -1490,7 +1503,7 @@ class WafBuilder:
     return self.create_conf(self.typ.SWIG).update(
         sources=srcs,
         libs=[self.libs.SwigCommon_N],
-        includes=['./inc', './src', './swig'],
+        includes=['./inc', './src', './swig', sp.check_output('python -c "import numpy; print(numpy.get_include())"', shell=True).decode().strip()],
         exports=['./swig'],
         features='cxx cxxshlib pyembed',
         swig_flags='-c++ -python -I/usr/include',

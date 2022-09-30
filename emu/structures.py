@@ -31,7 +31,7 @@ class Data:
     self.arch = None
 
   def set_m32(self, m32):
-    glog.debug('SETTING m32 %s'%m32)
+    glog.debug('SETTING m32 %s' % m32)
     self.is_m32 = m32
     set_cur_types_helper(m32)
     self.types_helper = None
@@ -39,8 +39,10 @@ class Data:
 
     if m32 is not None:
       self.types_helper = types_helper_by_m32[m32]
-      if m32: self.arch = arch_data[Arch.x86]
-      else: self.arch = arch_data[Arch.x86_64]
+      if m32:
+        self.arch = arch_data[Arch.x86]
+      else:
+        self.arch = arch_data[Arch.x86_64]
 
   def set_arch(self, arch):
     self.arch = arch
@@ -129,7 +131,8 @@ accessors_ctx = dict(
     ScaleAccessor=ScaleAccessor,
     inverter=InverterAccessor(),
     RemapAccessor=RemapAccessor,
-    GetterFunc=GetterFunc,)
+    GetterFunc=GetterFunc,
+)
 
 
 class StructExtractor:
@@ -260,15 +263,19 @@ class StructBuilder:
   def build(self, extra_args=[], want_sysincludes=True, cpp_mode=True):
     self.setup_includes()
     args = []
-    if want_sysincludes: args.append('-isystem/usr/include')
-    if g_data.is_m32: args.append('-m32')
+    if want_sysincludes:
+      args.append('-isystem/usr/include')
+    if g_data.is_m32:
+      args.append('-m32')
 
     args.extend(extra_args)
     code_content = '\n'.join(self.content)
     assert len(self.content) > 0
     glog.debug('Extracting >> %s', code_content)
-    self.res = OpaIndex.create_index(
-        file_content=code_content, cpp_mode=cpp_mode, args=args, filter=self.filter)
+    self.res = OpaIndex.create_index(file_content=code_content,
+                                     cpp_mode=cpp_mode,
+                                     args=args,
+                                     filter=self.filter)
     for macro in self.res.macros:
       self.consts[macro.name] = macro.val
 
@@ -322,9 +329,11 @@ class Structure(Attributize):
     self._force_array_size = force_array_size
     if backend is None and default_backend:
       backend = StructBackend(BufAccessor(self.byte_size))
+    backend = self.norm_backend(backend)
     self._backend = backend
 
-    if child_backend is None: child_backend = backend
+    if child_backend is None:
+      child_backend = backend
     self._child_backend = child_backend
 
     if self._base_typ != self._typ:
@@ -357,6 +366,11 @@ class Structure(Attributize):
     #self._mem = Memory(reader=self.get_buf, writer=self.set_buf, minv=0, maxv=self.bytesize)
     self._init_accessors()
 
+  def clone(self):
+    res = Structure(self._typ)
+    res.set_raw(self.raw)
+    return res
+
   def set_alloc_backend(self, allocator):
     self.set_backend(StructBackend(buf=BufAccessor(self.bytesize, allocator=allocator)))
 
@@ -368,12 +382,22 @@ class Structure(Attributize):
   def get_child_backend(self):
     return self._child_backend
 
+  def set_child_backend(self, v):
+    self._child_backend = v
+
   def add_field(self, field):
     off = field.off
     self.add_field_internal(field.name, self.add_child(field.typ, off, field.name))
 
   def create_child(self, typ, off, fieldname):
-    res = Structure(typ, self._off + off, self.get_child_backend(), parent=self, fieldname=fieldname)
+    res = Structure(
+        typ,
+        self._off + off,
+        self.get_child_backend(),
+        parent=self,
+        fieldname=fieldname,
+        default_backend=0,
+    )
     return res
 
   def add_child(self, typ, off, fieldname):
@@ -409,7 +433,7 @@ class Structure(Attributize):
 
   @property
   def byte_size(self):
-    return self._typ.size // 8
+    return (7 + self._typ.size) // 8
 
   @property
   def bytesize(self):
@@ -423,10 +447,9 @@ class Structure(Attributize):
   def offset(self):
     return self._off
 
-
   @property
   def mask(self):
-    return (1 << 8*self.byte_size) -1
+    return (1 << 8 * self.byte_size) - 1
 
   @property
   def byte_offset(self):
@@ -434,7 +457,8 @@ class Structure(Attributize):
 
   @property
   def array_size(self):
-    if self._force_array_size is not None: return self._force_array_size
+    if self._force_array_size is not None:
+      return self._force_array_size
     return self._typ.array_size
 
   @property
@@ -465,10 +489,14 @@ class Structure(Attributize):
   @property
   def raw(self):
     return self._get_raw()
+  def norm_backend(self, backend):
+    if backend is None: return None
+    if backend.atom_size < self._typ.atom_size:
+      backend = TransacBackend(backend.buf, self._typ.atom_size)
+    return backend
 
   def set_backend(self, backend):
-    if self._typ.atom_size is not None and (not isinstance(backend, TransacBackend) or backend.atom_size != self._typ.atom_size):
-      backend = TransacBackend(backend.buf, self._typ.atom_size)
+    backend  = self.norm_backend(backend)
     self._backend = backend
     self._child_backend = backend
     for child in self._children.values():
@@ -485,33 +513,36 @@ class Structure(Attributize):
     assert self.bitsize % 8 == 0
     self._backend.set(b'\x00' * self.byte_size, self.offset, self.bitsize)
 
-
   def get_ptr_as_str(self):
-    res=[]
+    res = []
     pos = self.get()
     cb = self.get_child_backend()
     read_batch = 128
     while True:
-      c  = cb.get((pos + len(res))*8, 8*read_batch)
-      p=c.find(0)
-      if p != -1: c = c[:p]
+      c = cb.get((pos + len(res)) * 8, 8 * read_batch)
+      assert len(c) == read_batch
+      p = c.find(0)
+      if p != -1:
+        c = c[:p]
       res.append(c.decode())
-      if p!=-1: break
+      if p != -1:
+        break
 
     return ''.join(res)
 
   def _set(self, typ_data, value):
-    if typ_data.typ != 'float': value = round(value)
-    value=self.val_to_buf(value, typ_data)
+    if typ_data.typ != 'float':
+      value = round(value)
+    value = self.val_to_buf(value, typ_data)
     self._set_raw(value)
 
   def get_for_call(self):
     return self._get(self._typ.typ_data)
 
   def val_to_buf(self, v, typ_data=None):
-    if typ_data is None: typ_data = self._typ.typ_data
+    if typ_data is None:
+      typ_data = self._typ.typ_data
     return g_data.types_helper.pack(typ_data, v, le=self._typ.le)
-
 
   def _get(self, typ_data):
     res = self._get_raw()
@@ -527,7 +558,7 @@ class Structure(Attributize):
     self._backend.set(data, self.offset + byteoff * 8, len(data) * 8, le=self._typ.le)
 
   def set_zero(self):
-    self.set_buf(0, b'\x00'*self.bytesize)
+    self.set_buf(0, b'\x00' * self.bytesize)
 
   def get_buf(self, byteoff, n):
     return self._backend.get(self.offset + byteoff * 8, n * 8)
@@ -539,7 +570,8 @@ class Structure(Attributize):
     if self.is_primitive:
       val = self._get(self._typ.typ_data)
       #glog.debug('Req get %s: %s %s', val, self.offset, self.bitsize)
-      if not choice: return val
+      if not choice:
+        return val
       return self._typ.choices.choice_str(val)
     elif self.is_pointer:
       return self._get(self._typ.typ_data)
@@ -551,8 +583,8 @@ class Structure(Attributize):
     if accessor_pos is not None and accessor_pos < len(self._accessors) and choice:
       return self._accessors[accessor_pos].set(value)
 
-    if not isinstance(value, bytes) and (self.is_primitive or (self.is_pointer and
-                                                               isinstance(value, int))):
+    if not isinstance(value, bytes) and (self.is_primitive or
+                                         (self.is_pointer and isinstance(value, int))):
       if isinstance(value, str):
         value = self._typ.choices.find_choice(value)
       return self._set(self._typ.typ_data, value)
@@ -570,9 +602,10 @@ class Structure(Attributize):
   def pretty_str(self, indent=0):
     prefix = '  ' * indent
     s = []
-    if self.is_primitive or self.is_array:
+    if self.is_primitive or self.is_array or self.is_pointer:
       v = self.get()
-      if isinstance(v, int): v = hex(v)
+      if isinstance(v, int):
+        v = hex(v)
       s.append('%s - %s: %s' % (prefix, self._fieldname, v))
     else:
       s.append('%s %s' % (prefix, self._fieldname))
@@ -599,7 +632,18 @@ class Structure(Attributize):
 
   def cast_array(self, ntyp, n):
     ntyp = g_data.arch.typs.find_if_str(ntyp)
-    pstruct = Structure(ntyp.make_array(n), off=self.get()*8, backend=self.get_child_backend(),)
+    pstruct = Structure(
+        ntyp.make_array(n),
+        off=self.get() * 8,
+        backend=self.get_child_backend(),
+    )
+    return pstruct
+
+  def deref(self, backend=None):
+    if backend is None:
+      backend = self.get_child_backend()
+    print('OFF >> ', self.get())
+    pstruct = Structure(self._base_typ, off=self.get() * 8, backend=backend)
     return pstruct
 
   def get_pointee(self, array_len=1):
@@ -610,8 +654,11 @@ class Structure(Attributize):
     return pstruct
 
   def smart_set(self, cur):
+    if cur is None: return
+
     if self.is_pointer:
-      if cur is None: self.set(0)
+      if cur is None:
+        self.set(0)
       elif isinstance(cur, int):
         self.set(cur)
       else:
@@ -620,8 +667,16 @@ class Structure(Attributize):
         array_len = len(cur)
         pointee = self.get_pointee(array_len=array_len)
         pointee.smart_set(cur)
-    elif isinstance(cur, (bytes, bytearray, str)):
+    elif isinstance(cur, (bytes, bytearray)):
       self.set(Format.ToBytes(cur))
+    elif isinstance(cur, str):
+      res = self._typ.choices.find_choice(cur)
+      if res is None:
+        print(self._typ.choices)
+        assert 0
+        res = Format.ToBytes(cur)
+      self.set(res)
+
     elif self.is_primitive:
       return self.set(cur)
     elif self.is_array:
@@ -631,7 +686,7 @@ class Structure(Attributize):
       for k, v in cur.items():
         self[k].smart_set(v)
     else:
-      assert 0
+      assert 0, type(cur)
 
   def from_args(self, **kwargs):
     return self.from_attr(kwargs)
@@ -744,7 +799,8 @@ class BufAccessorBase:
 
   def read(self, pos, n=None):
     curn = n
-    if n is None: curn = 1
+    if n is None:
+      curn = 1
 
     res = self._read(pos, curn)
     if n is None:
@@ -774,15 +830,20 @@ class BufAccessor(BufAccessorBase):
 
   def __init__(self, size=None, buf=None, **kwargs):
     super().__init__(**kwargs)
-    if buf is None: buf = bytearray([0] * size)
-    if size is None: size = len(buf)
+    print('create buf accessor', size)
+    if buf is None:
+      buf = bytearray([0] * size)
+    if size is None:
+      size = len(buf)
     self.buf = buf
 
   def _read(self, pos, n):
+    assert pos + n <= len(self.buf), f'{pos} {n} {len(self.buf)} {type(self.buf)}'
     return self.buf[pos:pos + n]
 
   def _write(self, pos, content):
     self.buf[pos:pos + len(content)] = content
+
 
 class MemBufAccessor(BufAccessorBase):
 
@@ -799,8 +860,9 @@ class MemBufAccessor(BufAccessorBase):
 
 class BaseBackend:
 
-  def __init__(self, **kwargs):
+  def __init__(self, atom_size=1, **kwargs):
     self.buf = kwargs['buf']
+    self.atom_size = atom_size
     # buffer start position is at @self.offset
     self.off = 0
 
@@ -832,17 +894,19 @@ class BaseBackend:
 
 class StructBackend(BaseBackend):
 
-  def __init__(self, buf=None, lazy=False, allocator=None):
-    super().__init__(buf=buf)
+  def __init__(self, buf=None, lazy=False, allocator=None, off_rebase=0, atom_size=1):
+    super().__init__(buf=buf, atom_size=atom_size)
     self.allocator = allocator
     self.lazy = lazy
     self.ops = DictWithDefault(default=lambda: [])
+    self.off_rebase = off_rebase
 
   def flush(self):
     for k, v in self.ops:
       pass
 
   def _get(self, off, size):
+    off -= self.off_rebase * 8
     base = off // 8
     off %= 8
     nx = (off + size + 7) // 8
@@ -853,29 +917,39 @@ class StructBackend(BaseBackend):
     return buf
 
   def _set(self, val, off, size, lazy, le):
+    off -= self.off_rebase * 8
     # TODO: le ignored here
     base = off // 8
     off %= 8
     val = bytearray(val)
-    if len(val) == 0: return
+    if len(val) == 0:
+      return
     if lazy == False or not self.lazy:
       nx = (off + size + 7) // 8
-      if le: val = val[:nx]
-      else: val = val[len(val) - nx:]
+      if le:
+        val = val[:nx]
+      else:
+        val = val[len(val) - nx:]
+      if len(val) != nx:
+        val.append(0)
       val = Format(val).shiftl(off).v
+      assert len(val) == nx, (val, nx)
+      val = val[:nx]
 
       mask0 = BitOps.mask(off)
-      maskn1 = BitOps.imask(
-          BitOps.mod1(off + size, 8), modpw=8)  # we dont want imask(0) (imask(8) needed)
+      maskn1 = BitOps.imask(BitOps.mod1(off + size, 8),
+                            modpw=8)  # we dont want imask(0) (imask(8) needed)
 
       b0 = self.buf.read(base)
       mask_b0 = mask0
       if nx == 1:
-        b0 |= maskn1
+        mask_b0 |= maskn1
       else:
-        if maskn1 != 0: val[-1] |= self.buf.read(base + nx - 1) & maskn1
+        if maskn1 != 0:
+          val[-1] |= self.buf.read(base + nx - 1) & maskn1
 
-      if mask_b0 != 0: val[0] |= b0 & mask_b0
+      if mask_b0 != 0:
+        val[0] |= b0 & mask_b0
 
       self.buf.write(base, val)
     else:
@@ -921,12 +995,13 @@ class TransacBackend(BaseBackend):
     super().__init__(buf=buf)
     self.atom_size = atom_size
     self.mask = ~(atom_size - 1)
-    self.ops = AtomizedList(
-        atom_size * 8, reader=self.atom_list_reader, writer=self.atom_list_writer)
+    self.ops = AtomizedList(atom_size * 8,
+                            reader=self.atom_list_reader,
+                            writer=self.atom_list_writer)
     self.deferred_write = deferred_write
     self._enable_cache = None
     self.read_cache = None
-    self.flush_read_cache(enable=True)
+    self.configure_flush_read_cache(enable=True)
 
   def read_cached(self, atom):
     val = None
@@ -949,17 +1024,18 @@ class TransacBackend(BaseBackend):
     self.buf.write_atom(atom, data)
 
   def enable_cache(self):
-    self.flush_read_cache(enable=True)
+    self.configure_flush_read_cache(enable=True)
 
   def disable_cache(self):
-    self.flush_read_cache(enable=False)
+    self.configure_flush_read_cache(enable=False)
 
-  def flush_read_cache(self, enable=False):
+  def configure_flush_read_cache(self, enable=False):
     self._enable_cache = enable
     self.read_cache = {}
 
   def flush(self):
     res = self.ops.proc()
+    self.read_cache = {}
 
   def _get(self, off, size):
     base = off // 8
@@ -997,10 +1073,14 @@ class TransacContext(ExitStack):
     super().__init__()
     self.transa_backend = transa_backend
 
+  def flush(self):
+    self.transa_backend.flush()
+
   def __enter__(self):
     self.transa_backend.enable_cache()
     self.callback(self.transa_backend.disable_cache)
     self.callback(self.transa_backend.flush)
+    return self
 
 
 def yaml_get_size(desc, default=None):
@@ -1016,31 +1096,43 @@ class YamlType(OpaBaseType):
   def __init__(self, name, data, db):
     super().__init__()
     self.name = name
-    self.atom_size = data.get('atom_size')
-    self.le = db.gbl.get('le', True) # might be ignored in some cases. To fix
+    self.atom_size = data.get('atom_size', 0)
+    self.le = db.gbl.get('le', True)  # might be ignored in some cases. To fix
 
     last_field = None
     self.is_union = data.get('union', False)
+    bitsize = 0
+    if self.is_union:
+      bitsize = data.get('size', 0) * 8
+      if not bitsize:
+        bitsize = data.get('bitsize', 0)
+
     size = 0
     for field_desc in data.fields:
-      new_field = YamlField(field_desc, last_field, db, parent=self)
+      new_field = YamlField(field_desc, last_field, db, parent=self, bitsize=bitsize)
       self.add_field(new_field)
-      if self.is_union: size = max(size, new_field.size)
-      else: last_field = new_field
+      if self.is_union:
+        size = max(size, new_field.size)
+      else:
+        last_field = new_field
 
     if last_field is not None:
       size = last_field.off + last_field.size
 
-    self.size = yaml_get_size(data, size)
-
+    size = yaml_get_size(data, size)
+    size=  cmisc.align(size, 8 * self.atom_size)
+    self.size = size
     self._is_primitive = False
     self.base_size = self.size
     self.base_typ = None
 
+  def as_struct(self, **kwargs):
+    return Structure(self, **kwargs)
+
 
 class YamlField(OpaBaseField):
 
-  def __init__(self, data, last_field, db, parent, ctx=None):
+  def __init__(self, data, last_field, db, parent, ctx=None, bitsize=0):
     super().__init__(parent)
     off = 0
     self.name = data.name
@@ -1051,6 +1143,9 @@ class YamlField(OpaBaseField):
       off = data.bitoffset
     elif last_field is not None:
       off = last_field.off + last_field.typ.size
+
+    if 'align' in data:
+      off = cmisc.align(off, 2**(data.align - 1 + 3))
 
     if 'fieldoff' in data:
       # used for views
@@ -1069,6 +1164,7 @@ class YamlField(OpaBaseField):
         if 'nelem' in data:
           typ.array_size = data.nelem
         else:
+          print(data.size, typ.base_typ.size)
           assert data.size * 8 % typ.base_typ.size == 0
           typ.array_size = data.size * 8 // (typ.base_typ.size)
         typ.name = '%s[%d]' % (typ.base_typ.name, typ.array_size)
@@ -1089,8 +1185,13 @@ class YamlField(OpaBaseField):
       typ = OpaBaseType()
       typ._is_primitive = True
 
-      if 'size' in data:
+      if bitsize:
+        typ.size = bitsize
+      elif 'size' in data:
         typ.size = data.size * 8
+      elif 'padalign' in data:
+        next_off = cmisc.align(off, data.padalign * 8)
+        typ.size = next_off - off
       else:
         typ.size = data.get('bitsize', 1)
 
@@ -1132,7 +1233,7 @@ class YamlStructBuilder:
     self.typs[name] = typ
 
   def add_yaml(self, s):
-    res = yaml.load(s)
+    res = yaml.load(s, Loader=yaml.FullLoader)
     res = Attributize.RecursiveImport(res)
     self.typs_to_build.update(res._elem)
 
@@ -1150,6 +1251,7 @@ class YamlStructBuilder:
       return self.build_typ(typ_name, self.typs_to_build[typ_name])
 
     assert typ_name.endswith('*') != -1, 'Bad typ %s' % typ_name
+    print('qq', typ_name)
     base_type = self.get_typ(typ_name[:-1])
     ntype = base_type.make_ptr()
     self.add_typ(typ_name, ntype)
@@ -1163,7 +1265,7 @@ class YamlStructBuilder:
     return res
 
 
-if arch_data is not None:
+if arch_data:
   g_data.set_m32(False)
   CORE_TYPES = YamlStructBuilder()
   arch_data[Arch.x86_64].typs = CORE_TYPES.typs

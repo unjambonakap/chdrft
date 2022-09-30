@@ -5,13 +5,12 @@ from chdrft.main import app
 from chdrft.utils.cmdify import ActionHandler
 from chdrft.utils.misc import Attributize, cwdpath
 import glog
-from chdrft.emu.structures import StructBuilder, SimpleStructExtractor, Structure, StructBackend, BufAccessor, BufAccessorBase
+from chdrft.emu.structures import StructBuilder, SimpleStructExtractor, Structure, StructBackend, BufAccessor, BufAccessorBase, g_data, CodeStructExtractor
 from chdrft.emu.base import Stack
 
 from contextlib import ExitStack
 import ctypes
 import chdrft.utils.misc as cmisc
-
 
 class FuncCallWrapper:
 
@@ -129,6 +128,18 @@ class AsyncMachineCaller(MachineCallerBase):
     yield res
 
 
+class CTypesCaller:
+  def __init__(self, gdata):
+    self.gdata = gdata
+    pass
+  def __call__(self, func, *args):
+    base_typ = self.gdata.types_helper.by_name.ptr.ctype
+
+    func_obj = ctypes.CFUNCTYPE(base_typ,*( (base_typ,) *len(args)))
+    f = func_obj(func)
+    res =  f(*args)
+    return res
+
 class SimpleBuf(BufAccessorBase):
 
   def __init__(self, addr, sz, read, write, **kwargs):
@@ -160,16 +171,24 @@ def mem_simple_buf_gen(mem):
   return SimpleBufGen(read=mem.read, write=mem.write)
 
 
-class CTypesBuf(BufAccessor):
+class CTypesBuf(BufAccessorBase):
 
-  def __init__(self, addr, sz, **kwargs):
-    typ = ctypes.c_char * sz
-    buf = typ.from_address(addr)
-    super().__init__(sz, buf, **kwargs)
+  def __init__(self, addr=None, sz=None, **kwargs):
+    super().__init__(**kwargs)
+    buf = None
+    if sz is not None:
+      typ = ctypes.c_char * sz
+      buf = typ.from_address(addr)
+    self.buf = buf
     self.addr = addr
 
   def _read(self, pos, n):
-    return self.buf[pos:pos + n]
+    if self.buf is not None:
+      return self.buf[pos:pos + n]
+    else:
+      typ = ctypes.c_char * n
+      buf = typ.from_address(pos)
+      return buf[:]
 
   def _write(self, pos, content):
     self.buf[pos:pos + len(content)] = content
@@ -218,15 +237,25 @@ class FunctionCaller:
     if self.allocator is not None: cur_allocator = self.allocator
 
     with cur_allocator:
+      self.cur_allocator = cur_allocator
       assert cur_allocator is not None
       data = []
       for farg, arg in zip(func.typ.args, args):
-        s = Structure(farg.typ, default_backend=False)
-        s.set_backend(StructBackend(buf=BufAccessor(s.bytesize, allocator=cur_allocator)))
+        s = self.get_structure(farg.typ)
         s.smart_set(arg)
         data.append(s.get_for_call())
       result = func(*data)
-      return result
+
+      restype =self.get_structure(func.typ.restype)
+      restype.set_child_backend(StructBackend(buf=CTypesBuf()))
+      restype.smart_set(result)
+      return restype
+
+  def get_structure(self, typ):
+    s = Structure(typ, default_backend=False)
+    s.set_backend(StructBackend(buf=BufAccessor(s.bytesize, allocator=self.cur_allocator)))
+    return s
+
 
   def __call__(self, *args, **kwargs):
     return self.call_func(*args, **kwargs)
@@ -255,7 +284,6 @@ class AsyncFunctionCaller:
     return next(self.coroutine)
 
   def call_func(self, func, *args, **kwargs):
-    print('CALLFUNC ', func, args)
     assert len(args) == 0 or len(kwargs) == 0
     if len(kwargs) != 0:
       args = []
@@ -280,3 +308,45 @@ class AsyncFunctionCaller:
 
   def __call__(self, *args, **kwargs):
     return self.call_func(*args, **kwargs)
+
+
+
+def create_ctypes_caller(ctypes_lib, code):
+  allocator =CTypesAllocator()
+  caller = CTypesCaller(g_data)
+  fcgen = FuncCallWrapperGen(code_db=code, lib=ctypes_lib, caller=caller)
+  fc = FunctionCaller(allocator, fcgen)
+  return fc
+
+def test(ctx):
+  #fona_target = swig_unsafe.elec_fona_test_target_swig
+  import ctypes
+  l1 = ctypes.cdll.LoadLibrary('libc.so.6')
+  g_data.set_m32(False)
+
+  test_code = '''
+int getpid();
+char *get_current_dir_name();
+char *strdup(const char *s);
+'''
+  g_code = StructBuilder()
+  g_code.add_extractor(CodeStructExtractor(test_code, ''))
+  g_code.build(extra_args=[], want_sysincludes=False)
+
+  fc =create_ctypes_caller(l1, g_code)
+  print(fc.getpid().get())
+  print(fc.get_current_dir_name().get_ptr_as_str())
+  print(fc.strdup('jambonkapap').get_ptr_as_str())
+
+def args(parser):
+  clist = CmdsList().add(test)
+  ActionHandler.Prepare(parser, clist.lst, global_action=1)
+
+
+
+def main():
+  ctx = Attributize()
+  ActionHandler.Run(ctx)
+
+
+app()

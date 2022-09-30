@@ -26,7 +26,7 @@ from chdrft.cmds import CmdsList
 from chdrft.main import app
 from chdrft.utils.path import FileFormatHelper
 
-uc =  None
+uc = None
 try:
   import capstone as cs
   from capstone.x86_const import *
@@ -41,9 +41,8 @@ try:
   import capstone.mips_const as cs_mips_const
   import unicorn as uc
 except Exception as e:
-  exc_type, exc_value, exc_traceback = sys.exc_info()
+  #traceback.print_exc(e)
   print('Got exception', e)
-  traceback.print_tb(exc_traceback)
   pass
 
 
@@ -175,6 +174,7 @@ def norm_ins(code):
   x = '\n'.join(map(str.strip, tsf))
   x += '\n'
   return x
+
 
 
 
@@ -377,10 +377,8 @@ class X86Machine(Machine):
         lst.append(self.arch.cs_regs.get_name(op.reg))
     return lst
 
-
-if not uc:
-  arch_data = None
-else:
+arch_data = None
+if uc:
   x86_16_arch = Attributize(
       regs=x86_16_regs,
       ins_size=-1,
@@ -523,6 +521,7 @@ else:
     if 'call_data' in v: v.call_data=CallData(v, v.call_data)
 
     v.typs = None
+
 
   x64_mc = X86Machine(True)
   x86_mc = X86Machine(False)
@@ -787,6 +786,23 @@ def patch_file(fname, pos, patch):
     pos = pos - vaddr + off
     mm[pos:pos + len(patch)] = patch
     mm.close()
+
+
+
+def patch_pattern(fname, src, dest, dry=0):
+  ok=0
+  with open(fname, 'r+b') as f:
+    f.read()
+    mm = mmap.mmap(f.fileno(), 0)
+    pos = mm.find(src)
+    if pos != -1:
+      if dry:
+        print('WOUDL REPLACEe ', mm[pos:pos+len(dest)], 'with', dest)
+      else:
+        mm[pos:pos + len(dest)] = dest
+      ok=1
+    mm.close()
+  return ok
 
 
 class DebugRegion:

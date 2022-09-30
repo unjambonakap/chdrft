@@ -1,0 +1,15 @@
+magic -dnull -noconsole <<'END'
+  lef read ${LEF_FILE}
+  def read ${MAIN}.def
+  writeall force ${MAIN}
+END
+
+magic -dnull -noconsole <<'END'
+  gds read ${STDCELLS_GDS}
+  writeall force
+END
+
+magic -dnull -noconsole ${MAIN} <<'END'
+  gds write ${MAIN}
+  cif write ${MAIN}
+END

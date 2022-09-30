@@ -1,3 +1,8 @@
+#!/usr/bin/env python 
+
+
+import chdrft.utils.misc  as cmisc
+import seaborn as sns
 import numpy as np
 kelly_colors_hex_c1 = [
     0xFFB300,  # Vivid Yellow
@@ -97,6 +102,7 @@ class ColorPool:
       self.p1.append(c)
     elif c in kelly_colors_hex_c2 and c not in self.p2:
       self.p2.append(c)
+  def __call__(self): return self.get()
 
   def get(self):
     if len(self.p1) > 0:
@@ -109,4 +115,17 @@ class ColorPool:
   def get_rgb(self):
     return ColorConv.to_rgb(self.get())
 
+
+class ColorMapper:
+  def __init__(self, vals):
+    self.rmp = cmisc.Remap(vals)
+    self.cmap = sns.color_palette(n_colors=self.rmp.n)
+
+  def get(self, x):
+    return self.cmap[self.rmp.get(x)]
+
+
+def get_inf_cpool(name) -> cmisc.InfGenerator:
+    from vispy.color import Color, get_colormap
+    return cmisc.InfGenerator(get_colormap('viridis'))
 
