@@ -29,6 +29,8 @@ from chdrft.utils.misc import Attributize
 import chdrft.utils.misc as cmisc
 import glog
 from chdrft.config.env import g_env
+from chdrft.utils.rx_helpers import ImageIO
+import contextlib
 
 from chdrft.dsp.datafile import Dataset2d, Dataset
 
@@ -56,6 +58,12 @@ class EventHelper:
     if pos is not None:
       pos = pg.Point(pos)
     self._pos = pos
+
+
+  def check(self, val=None, shift=False, meta=False) -> bool:
+    if self.has_shift() != shift: return False
+    if self.has_meta() != meta: return False
+    return self.ev.key() == getattr(qt_imports.QtCore.Qt, f'Key_{val}')
 
   def has_meta(self):
     return (self.mods & qt_imports.QtCore.Qt.MetaModifier) != 0
@@ -943,6 +951,72 @@ class GraphHelper:
       else:
         qt_imports.QtGui.QApplication.instance().exec_()
 
+class MetricWidget(qt_imports.QtWidgets.QLabel):
+
+  def __init__(self, name):
+    super().__init__()
+    self.setAutoFillBackground(True)
+    self.name = name
+    self.io = ImageIO(f=self.proc_impl)
+
+    self.v = None
+    self.refresh()
+
+  def refresh(self):
+    if not isinstance(self.v, str):
+      res = cmisc.json_dumps(self.v)
+    else:
+      res = self.v
+
+    self.setText(f'{self.name}: {res}')
+    self.setAlignment(qt_imports.QtCore.Qt.AlignCenter)
+
+  def proc_impl(self, v):
+    self.v = v
+    self.refresh()
+
+  @staticmethod
+  def Make(name=None, obs=None):
+    res = MetricWidget(name)
+    ImageIO.Connect(obs, res.io)
+    return res
+
+
+class TimerHelper:
+
+  def __init__(self, mw: MainWindow = None):
+    self.timers = []
+    self.mw = mw
+    if self.mw:
+      mw.closed.subscribe(self.cleanup)
+
+  def cleanup(self, closed):
+    if not closed: return
+    print('cleaning up')
+    timers = self.timers
+    self.timers = None
+    for x in timers:
+      x.stop()
+
+  def do_call(self, func):
+    if self.timers is None: return
+    func()
+
+  def add(self, func, period_sec: float):
+    timer = qt_imports.QtCore.QTimer()
+    timer.timeout.connect(lambda: self.do_call(func))
+    timer.start(int(1000 * period_sec))
+    self.timers.append(timer)
+
+
+  @contextlib.contextmanager
+  @staticmethod
+  def Create(mw: MainWindow = None) -> "TimerHelper":
+    res = TimerHelper()
+    try:
+      yield res
+    finally:
+      res.cleanup(closed=True)
 
 def test1(ctx):
   g = GraphHelper()

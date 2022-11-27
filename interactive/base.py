@@ -11,12 +11,13 @@ from chdrft.utils.cmdify import ActionHandler
 from chdrft.utils.misc import Attributize
 import chdrft.utils.misc as cmisc
 import glog
-from chdrft.interactive.kernel_jup import OpaKernelSpecManager, OpaKernelApp, list_kernels
+from chdrft.interactive.kernel_jup import OpaKernelSpecManager, OpaKernelApp, list_kernels, KernelKind
 import pprint
 
 global flags, cache
 flags = None
 cache = None
+
 
 
 def args(parser):
@@ -69,7 +70,7 @@ def run_notebook(
 
 
 @cmisc.logged_f()
-def create_kernel(runid=None, do_run_notebook=False, in_thread=False, blender=False, conn_dir=None, **kwargs):
+def create_kernel(runid=None, do_run_notebook=False, in_thread=False, blender=False, conn_dir=None, kind=KernelKind.OTHER, **kwargs):
   if runid is None: runid = app.flags.runid
   if conn_dir is not None: cmisc.makedirs(conn_dir)
 
@@ -80,7 +81,10 @@ def create_kernel(runid=None, do_run_notebook=False, in_thread=False, blender=Fa
   user_module, _ = extract_module_locals(1)
   user_ns = par_globals
 
+  if blender: kind = KernelKind.BLENDER
+
   ipkernel = OpaKernelApp.instance(user_ns=user_ns)
+  ipkernel._kind = kind
   if conn_dir: ipkernel.connection_dir = conn_dir
   ipkernel.runid = runid
 
@@ -90,7 +94,6 @@ def create_kernel(runid=None, do_run_notebook=False, in_thread=False, blender=Fa
     kwargs['runid'] = app.flags.runid
     threading.Thread(target=run_notebook, kwargs=kwargs).start()
 
-  print('LA create kernel')
 
   if blender:
     import chdrft.interactive.blender as blender
@@ -136,7 +139,7 @@ def test_run_notebook(ctx):
 
 def start_blender(ctx):
   sp.check_call(
-      f'blender --debug-python --python-use-system-env --python-expr "from chdrft.interactive.base import create_kernel; create_kernel(runid=\'blender1\', blender=1, conn_dir=\'{ctx.conn_dir}\') "',
+      f'unbuffered blender --debug-python --python-use-system-env --python-expr "from chdrft.interactive.base import create_kernel; create_kernel(runid=\'blender1\', blender=1, conn_dir=\'{ctx.conn_dir}\') "',
       shell=1
   )
 

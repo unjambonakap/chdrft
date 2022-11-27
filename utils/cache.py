@@ -25,7 +25,7 @@ def dump_caches():
 
 
 class CacheDB(object):
-  default_cache_filename = 'chdrft.cache.pickle'
+  default_cache_filename = '.chdrft.cache.pickle'
   default_conf = 'default'
 
   def __getstate__(self):
@@ -103,6 +103,8 @@ class CacheDB(object):
   def list_conf(self):
     return self._cache.keys()
 
+  def clear(self):
+    self._confobj.clear()
   def clean(self):
     self._confobj.clear()
 
@@ -249,7 +251,7 @@ class Cachable:
   def _cachable_get_full_key(cache, key, args, kwargs, self=None, opa_fields=None):
     if self is not None:
       cacheobj = Cachable.GetCacheObj(self)
-      if opa_fields is None: opa_fields= cacheobj.get('fields', None)
+      if opa_fields is None: opa_fields = cacheobj.get('fields', None)
 
     if opa_fields is not None:
       selfdata = []
@@ -257,21 +259,26 @@ class Cachable:
         selfdata.append(getattr(self, field))
       return cache.get_str2([key, selfdata, args, kwargs])
 
-    if self is not None: args = (self, ) +args
+    if self is not None: args = (id(self),) + tuple(args)
     return cache.get_str2([key, args, kwargs])
 
   @staticmethod
-  def proc_cached(cache, key, f, args, kwargs, self=None, opa_fields=None, opa_fullkey=None, id_self=0):
+  def proc_cached(
+      cache, key, f, args, kwargs, self=None, opa_fields=None, opa_fullkey=None, id_self=0
+  ):
     iself = self
     if self is not None and id_self: iself = id(self)
 
     full_key = opa_fullkey
     if full_key is None:
-      full_key = Cachable._cachable_get_full_key(cache, key, args, kwargs, self=iself, opa_fields=opa_fields)
+      full_key = Cachable._cachable_get_full_key(
+          cache, key, args, kwargs, self=iself, opa_fields=opa_fields
+      )
     elif not isinstance(full_key, str):
       full_key = cache.get_str2(full_key)
 
-    if (not full_key in cache._recompute_set) and (not key in cache._recompute_set) and full_key in cache:
+    if (not full_key
+        in cache._recompute_set) and (not key in cache._recompute_set) and full_key in cache:
       return cache[full_key]
 
     if self is not None: res = f(self, *args, **kwargs)
@@ -298,33 +305,48 @@ class Cachable:
         if cache is None:
           cache = global_cache
 
-        return Cachable.proc_cached(cache, key, f, args, kwargs, self=self, opa_fields=fields, opa_fullkey=fullkey)
+        return Cachable.proc_cached(
+            cache, key, f, args, kwargs, self=self, opa_fields=fields, opa_fullkey=fullkey
+        )
 
       return cached_f
 
     return cached_wrap
 
   @staticmethod
-  def cachedf(alt_key=None, fileless=True):
+  def GetCache(fileless):
+
+    if fileless:
+      global global_fileless_cache
+      if global_fileless_cache is None:
+        global_fileless_cache = FilelessCacheDB()
+        from chdrft.main import app
+        app.global_context.enter_context(global_fileless_cache)
+      cache = global_fileless_cache
+    else:
+      cache = global_cache
+    return cache
+
+  @staticmethod
+  def ResetCache(fileless=True):
+    Cachable.GetCache(fileless).clear()
+
+  @staticmethod
+  def cachedf(alt_key=None, fileless=True, method=False):
 
     def cached_wrap(f):
 
       def cached_f(*args, **kwargs):
-        if fileless:
-          global global_fileless_cache
-          if global_fileless_cache is None:
-            global_fileless_cache = FilelessCacheDB()
-            from chdrft.main import app
-            app.global_context.enter_context(global_fileless_cache)
-          cache = global_fileless_cache
-        else:
-          cache = global_cache
         key = Cachable._cachable_get_key_func(f, alt_key)
-        return Cachable.proc_cached(cache, key, f, args, kwargs)
+        self = None
+        if method:
+          self, *args = args
+        return Cachable.proc_cached(Cachable.GetCache(fileless), key, f, args, kwargs, self=self)
 
       return cached_f
 
     return cached_wrap
+
   @staticmethod
   def cached_property():
     return Cachable.cached2(id_self=1)
@@ -375,22 +397,21 @@ def print_cache(args):
 
 
 class Proxifier:
+
   def __init__(self, cl, *args, **kwargs):
     super().__setattr__('_opa_obj', cl(*args, **kwargs))
     super().__setattr__('_opa_key', dict(args=args, kwargs=kwargs))
 
-
   def __getattr__(self, name):
-      res = getattr(self._opa_obj, name)
-      if callable(res):
+    res = getattr(self._opa_obj, name)
+    if callable(res):
 
-        @Cachable.cached(fullkey=self._opa_key)
-        def interceptor(*args, **kwargs):
-          return res(*args, **kwargs)
+      @Cachable.cached(fullkey=self._opa_key)
+      def interceptor(*args, **kwargs):
+        return res(*args, **kwargs)
 
-        return interceptor
-      return res
-
+      return interceptor
+    return res
 
   def __setattr__(self, name, val):
     if name.startswith('_'):

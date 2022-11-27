@@ -27,11 +27,15 @@ import tempfile
 from reprlib import recursive_repr
 from pydantic import BaseModel, Field, Extra
 import pydantic
+import pandas as pd
+from functools import cached_property
 
 from typing import no_type_check
 from copy import deepcopy
+from chdrft.config.base import is_python2
 
 pydantic.BaseConfig.copy_on_model_validation = False
+
 
 def yield_wrapper(f):
 
@@ -167,6 +171,10 @@ try:
   from contextlib import ExitStack
   import ctypes
   from asq.initiators import query as asq_query
+  from asq.queryables import Queryable
+  Queryable.where_like = lambda self, **kwargs: self.where(
+      lambda x: all(getattr(x, k) == v for k, v in kwargs.items())
+  )
 except:
   pass
 
@@ -194,7 +202,6 @@ try:
   from progressbar import ProgressBar
 except:
   pass
-is_python2 = sys.version_info < (3, 0)
 if is_python2:
   try:
     from builtins import *
@@ -245,10 +252,10 @@ if sys.version_info >= (3, 0):
 
   #import jsonpickle.ext.numpy as jsonpickle_numpy
   #jsonpickle_numpy.register_handlers()
-  def json_dumps(*args, **kwargs):
+  def json_dumps(*args, default=None, **kwargs):
     return jsonpickle.dumps(*args, backend=misc_backend, unpicklable=0, **kwargs)
 
-  def json_loads(*args, **kwargs):
+  def json_loads(*args, default=None, **kwargs):
     return jsonpickle.loads(*args, backend=misc_backend, **kwargs)
 
 
@@ -352,13 +359,13 @@ def rol(v, n, sz):
 def cycle_arr(a, n):
   return np.concatenate((a[n:], a[n:]))
 
+
 def loop(x):
   ix = iter(x)
   a = next(ix)
   yield a
   yield from ix
   yield a
-
 
 
 def flatten(a, explode=False, depth=-1):
@@ -1894,14 +1901,69 @@ except Exception as e:
   glog.error(e)
   pass
 
+class cached_classproperty(object):
+  """
+    A property that is only computed once per class and then replaces
+    itself with an ordinary attribute. Deleting the attribute resets the
+    property.
+    """
 
-class PatchedModel(BaseModel, extra=Extra.forbid):
+  def __init__(self, func):
+    self.__doc__ = getattr(func, '__doc__')
+    self.func = func
 
-  def __eq__(self, peer): return id(self) == id(peer)
+  def __get__(self, obj, cls):
+    if obj is None and cls is None:
+      return self
+    if cls is None:
+      cls = type(obj)
+    value = self.func(cls)
+    setattr(cls, self.func.__name__, value)
+    return value
+
+
+class PatchedModel(
+    BaseModel,
+    extra=Extra.forbid,
+    arbitrary_types_allowed=True,
+    keep_untouched=(cached_property, cached_classproperty),
+    json_dumps=json_dumps,
+    json_loads=json_loads,
+    allow_population_by_field_name=True,
+):
+
+  def json(self):
+    return json_dumps(self)
+
+  def __excluded_keys(self) -> set[str]:
+    res = set()
+    for k in self.__dict__.keys():
+      if isinstance(getattr(type(self), k, None), (cached_property, cached_classproperty)):
+        res.add(k)
+    return res
+
+
+
+  def dict(self, *args, exclude=None, **kwargs):
+    if exclude is None: exclude = {}
+    for k in self.__excluded_keys():
+      if isinstance(exclude, dict):
+        exclude[k] = True
+      else:
+        exclude.add(k)
+    return super().dict(*args, exclude=exclude, **kwargs)
+
+  def __reduce_ex__(self, _):
+    ex = self.__excluded_keys()
+    res = {k:v for k,v in self.__dict__.items() if k not in ex}
+    return (lambda: self.__class__(**res), ())
+
+
+  def __eq__(self, peer):
+    return id(self) == id(peer)
+
   def __hash__(self):
     return hash(id(self))
-
-
 
   @no_type_check
   def __setattr__(self, name, value):
@@ -1921,3 +1983,27 @@ class PatchedModel(BaseModel, extra=Extra.forbid):
           break
       else:
         raise e
+
+
+
+class PydanticHandler(jsonpickle.handlers.BaseHandler):
+
+  def flatten(self, obj, data):
+    return self.context.flatten(obj.dict())
+
+  def restore(self, obj):
+    assert 0
+
+
+class PDTimestampHandler(jsonpickle.handlers.BaseHandler):
+
+  def flatten(self, obj, data):
+    return self.context.flatten(str(obj))
+
+
+PydanticHandler.handles(BaseModel)
+jsonpickle.handlers.register(BaseModel, PydanticHandler, base=True)
+jsonpickle.handlers.register(pd.Timestamp, PDTimestampHandler, base=True)
+jsonpickle.handlers.register(pd.Timedelta, PDTimestampHandler, base=True)
+PDTimestampHandler.handles(pd.Timedelta)
+

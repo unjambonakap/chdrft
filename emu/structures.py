@@ -537,7 +537,13 @@ class Structure(Attributize):
     self._set_raw(value)
 
   def get_for_call(self):
-    return self._get(self._typ.typ_data)
+    content = self._get(self._typ.typ_data)
+    if self.is_array:
+      addr, buf = self.backend.buf.allocate(self.bytesize)
+      buf.write(0, content)
+      content = addr
+    return content
+
 
   def val_to_buf(self, v, typ_data=None):
     if typ_data is None:
@@ -642,7 +648,6 @@ class Structure(Attributize):
   def deref(self, backend=None):
     if backend is None:
       backend = self.get_child_backend()
-    print('OFF >> ', self.get())
     pstruct = Structure(self._base_typ, off=self.get() * 8, backend=backend)
     return pstruct
 
@@ -830,7 +835,6 @@ class BufAccessor(BufAccessorBase):
 
   def __init__(self, size=None, buf=None, **kwargs):
     super().__init__(**kwargs)
-    print('create buf accessor', size)
     if buf is None:
       buf = bytearray([0] * size)
     if size is None:

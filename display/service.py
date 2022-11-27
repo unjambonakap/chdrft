@@ -15,7 +15,7 @@ from chdrft.utils.path import FileFormatHelper
 from chdrft.utils.fmt import Format
 import chdrft.display.grid as grid
 from chdrft.dsp.datafile import Dataset
-from chdrft.display.ui import PlotEntry, OpaPlot
+from chdrft.display.ui import PlotEntry, OpaPlot, MetricWidget
 from chdrft.dsp.image import ImageData
 import chdrft.display.video_helper as vh
 from rx import operators as ops
@@ -50,6 +50,8 @@ class PlotService:
 
   def __init__(self):
     self.windows = []
+  def setup(self):
+    grid.create_app()
 
   def create_window(self, **kwargs):
     grid.create_app()
@@ -74,9 +76,10 @@ class PlotService:
       return typ
 
     if isinstance(obj, (Dataset, np.ndarray, PlotEntry)): return PlotTypes.Graph
+    if isinstance(obj, (vh.QWidget, MetricWidget)): return PlotTypes.Metric
     return PlotTypes.Vispy
 
-  def plot(self, obj, typ=None, new_window=0, label=None, o=0, gwh=None, **kwargs):
+  def plot(self, obj=None, typ=None, new_window=0, label=None, o=0, gwh=None, **kwargs):
     if not new_window: gwh = self.find_window()
     if not gwh: gwh = self.create_window()
     typ = self.guess_typ(obj, typ)
@@ -107,9 +110,11 @@ class PlotService:
     data = entry.add_plot(obj, **kwargs)
     return A(w=entry, data=data)
 
-  def plot_metric(self, obj, entry=None, gwh=None, **kwargs):
+  def plot_metric(self, obj=None, entry=None, gwh=None, **kwargs):
     if entry is None: entry = grid.MetricStoreWidget()
-    data = entry.add(vh.MetricWidget.Make(obj))
+    if not isinstance(obj, MetricWidget):
+      obj = MetricWidget.Make(**obj)
+    data = entry.add(obj)
     return A(w=entry, data=data)
 
 

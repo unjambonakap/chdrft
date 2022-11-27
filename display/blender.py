@@ -60,7 +60,8 @@ def clear_collection(col):
 
 
 class BlenderTriangleActor(TriangleActorBase):
-  def __init__(self, name = "object"):
+
+  def __init__(self, name="object"):
     self._name = name
 
   def _norm_tex(self, tex):
@@ -69,7 +70,6 @@ class BlenderTriangleActor(TriangleActorBase):
   @property
   def blender_obj(self) -> bpy.types.Object:
     return self.obj
-
 
   def _build_impl(self, tex):
     edges = []
@@ -194,13 +194,15 @@ def blender_obj_to_meshio(obj, bl_func=lambda _: False):
   m = meshio.Mesh(e.vertices, [('triangle', e.faces)])
   return m
 
+
 class BlenderObjWrapper:
+
   def __init__(self, obj):
     self.internal: bpy.types.Object = obj
 
-
   @property
-  def data(self): return self.internal.data
+  def data(self):
+    return self.internal.data
 
   @property
   def mat_world(self):
@@ -222,11 +224,17 @@ class BlenderObjWrapper:
 
 
 class KeyframeObjData(cmisc.PatchedModel):
-  obj: BlenderObjWrapper 
+  obj: BlenderObjWrapper
   wl: np.ndarray
 
-  class Config:
-    arbitrary_types_allowed = True
+  def propagate(self):
+    self.obj.mat_local = np.identity(4)
+    rot = self.wl[:3, :3]
+
+    self.obj.internal.rotation_mode = 'QUATERNION'
+    self.obj.internal.rotation_quaternion = blender_quat(R.from_matrix(rot))
+    self.obj.internal.location = self.wl[:3, 3]
+
 
 class AnimationSceneHelper(cmisc.PatchedModel):
   fid: int = 0
@@ -237,7 +245,6 @@ class AnimationSceneHelper(cmisc.PatchedModel):
     for o in bpy.context.scene.objects:
       o.animation_data_clear()
 
-
   def start(self):
     self.clear()
     self.fid = 0
@@ -245,12 +252,7 @@ class AnimationSceneHelper(cmisc.PatchedModel):
 
   def push(self, items: list[KeyframeObjData]):
     for y in items:
-      y.obj.mat_local = np.identity(4)
-      rot = y.wl[:3, :3]
-
-      y.obj.internal.rotation_mode = 'QUATERNION'
-      y.obj.internal.rotation_quaternion = blender_quat(R.from_matrix(rot))
-      y.obj.internal.location = y.wl[:3, 3]
+      y.propagate()
 
       y.obj.internal.keyframe_insert(data_path='location', frame=self.fid)
       y.obj.internal.keyframe_insert(data_path='rotation_quaternion', frame=self.fid)
@@ -259,7 +261,7 @@ class AnimationSceneHelper(cmisc.PatchedModel):
   def finish(self):
     bpy.context.scene.frame_start = 0
     bpy.context.scene.frame_end = int(self.fid)
-    bpy.context.scene.frame_set(0)
+    bpy.context.scene.frame_set(1)
 
 
 def test(ctx):

@@ -149,11 +149,11 @@ class ActionHandler:
     self.parser = parser
     self.cmds = {x.get_name(): x for x in cmds}
     parser.add_argument('--actions', type=str, default='')
-    parser.add_argument('--cleanup_actions', type=str, default='')
-    parser.add_argument('--action_output_file', type=str)
-    parser.add_argument('--noaction_log_output', action='store_true')
-    parser.add_argument('--noctrlc_trace', action='store_true')
-    parser.add_argument('--ret_syscode', action='store_true')
+    parser.add_argument('--cleanup-actions', type=str, default='')
+    parser.add_argument('--action-output-file', type=str)
+    parser.add_argument('--noaction-log-output', action='store_true')
+    parser.add_argument('--noctrlc-trace', action='store_true')
+    parser.add_argument('--ret-syscode', action='store_true')
     parser.add_argument('--no-local-db', action='store_true')
     parser.add_argument('--local-db-file', type=str, default='.chdrft.db.pickle')
 

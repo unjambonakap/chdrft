@@ -2,12 +2,30 @@
 
 import os
 import chdrft.utils.misc as cmisc
+import jax
+from chdrft.main import app
+import tempfile
+import numpy as np
+import random
+
+
+np.random.seed(0)
+random.seed(0)
+np.set_printoptions(edgeitems=10, linewidth=180)
+np.set_printoptions(formatter={'int_kind': '{:},'.format, 'float_kind': '{:.07f},'.format})
 
 g_pyqt4 = 'pyqt4'
 g_pyqt5 = 'pyqt5'
 g_environ_pyqt = 'QT_API'
 os.environ['SAGE_LOCAL'] = '/usr'
+jax_dump_dir = app.global_context.enter_context(tempfile.TemporaryDirectory())
 
+
+os.environ["XLA_FLAGS"] = f'--xla_force_host_platform_device_count=16 --xla_embed_ir_in_executable --xla_dump_to={jax_dump_dir}'
+
+import jax
+from jax.config import config
+config.update("jax_enable_x64", False)
 
 class Env:
 
@@ -99,10 +117,13 @@ def init_jupyter():
       math=math,
       app=app,
       cmisc=Z.cmisc,
+      os=os,
       K=K,
       A=Z.cmisc.A,
       itertools=cmisc.itertools,
       functools=Z.functools,
       pd=pd,
-      oplt=K.g_plot_service
+      oplt=K.g_plot_service,
+    g_env=g_env,
+    qt_imports=qt_imports,
   )

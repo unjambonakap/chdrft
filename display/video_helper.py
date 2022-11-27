@@ -27,9 +27,12 @@ import cv2
 import sortedcontainers
 import chdrft.display.grid as grid
 from vispy.plot import Fig
+from pydantic import Field
+from typing import ClassVar
 
 from PyQt5 import QtCore
 from PyQt5.QtCore import Qt
+from chdrft.utils.rx_helpers import ImageIO, FuncCtxImageProcessor, FuncImageProcessor
 
 import PyQt5.QtWidgets as QtWidgets
 from PyQt5.QtWidgets import (
@@ -50,94 +53,6 @@ def args(parser):
   clist = CmdsList()
   parser.add_argument('--infile')
   ActionHandler.Prepare(parser, clist.lst, global_action=1)
-
-
-class ImageIO:
-  kEndStream = object()
-
-  @staticmethod
-  def Connect(a, b):
-    if isinstance(a, ImageIO): a.connect_to(b)
-    a.subscribe(b.push)
-
-  def __init__(self, f=None):
-    self.src = rx.subject.BehaviorSubject(None)
-    self.dest = rx.subject.BehaviorSubject(None)
-    if f is None:
-      f = lambda x: x
-    self.f = f
-    self._last = None
-    self._last_in = None
-    self.src.subscribe(self.proc)
-    self.res = None
-
-
-  def register_ctx(self, ctx):
-    self._ctx = ctx
-    for k, v in ctx.items():
-      if isinstance(v, rx.core.Observable):
-        v.subscribe(lambda _ : self.rerun())
-
-  def rerun(self):
-    self.proc(self._last_in)
-
-  def send_endstream(self):
-    self.push(ImageIO.kEndStream)
-
-  def end_stream(self):
-    pass
-
-  def proc_impl(self, i):
-    return self.f(i)
-
-  def proc(self, i):
-    self._last_in = i
-    if i is None:
-      return
-    if id(i) == id(ImageIO.kEndStream):
-      self.res = self.end_stream()
-      r = i
-    else:
-      r = self.proc_impl(i)
-    self._last = r
-    if r is not None:
-      self.dest.on_next(r)
-
-  def push(self, e):
-    self.src.on_next(e)
-
-  def connect_to(self, nxt):
-    self.dest.subscribe(nxt.push)
-
-
-class VideoWriter(ImageIO):
-
-  def __init__(self, fname, format='rgb24'):
-    super().__init__()
-    self.fname = fname
-    self.container = av.open(fname, 'w')
-    self.ostream = self.container.add_stream('mpeg4')
-    self.format = format
-    self.first = 1
-
-  def proc_impl(self, i):
-    self.feed(i)
-
-  def end_stream(self):
-    self.finish()
-
-  def feed(self, img):
-    if img is None:
-      return
-    if self.first:
-      self.ostream.width = img.img_box.width
-      self.ostream.height = img.img_box.height
-      self.first = 0
-    frame = av.VideoFrame.from_ndarray(img.img, format=self.format)
-    self.container.mux(self.ostream.encode(frame))
-
-  def finish(self):
-    self.container.close()
 
 
 class VideoReader:
@@ -214,17 +129,22 @@ class VideoReader:
 
     self._gen = self.gen(**kwargs)
 
+
 class TimeSpecType(Enum):
-  Rel=1,
-  TS=2,
-  S=3,
-  FID=4
+  Rel = 1,
+  TS = 2,
+  S = 3,
+  FID = 4
+
+
 class TimeSpec:
+
   def __init__(self, v, typ):
     self.v = v
     self.typ = typ
 
-  def is_ts(self): return self.typ == TimeSpecType.TS
+  def is_ts(self):
+    return self.typ == TimeSpecType.TS
 
   @staticmethod
   def Make(v, typ):
@@ -232,176 +152,19 @@ class TimeSpec:
     return TimeSpec(v, typ)
 
   @staticmethod
-  def MakeTS(v): return TimeSpec.Make(v, TimeSpecType.TS)
+  def MakeTS(v):
+    return TimeSpec.Make(v, TimeSpecType.TS)
+
 
 class VideoFrameDb:
+
   def __init__(self, fname, **kwargs):
     vs = VideoReader(fname, **kwargs)
     self.id2ts = {}
     self.ts2id = sortedcontainers.SortedDict()
     for i, frame in enumerate(vs.gen()):
-      self.id2ts[i] =frame.ts
+      self.id2ts[i] = frame.ts
       self.ts2id[frame.ts] = i
-
-
-class IdIO(ImageIO):
-
-  def __init__(self):
-    super().__init__(self)
-
-  def proc_impl(self, i):
-    return i
-
-
-def pipe_connect(*args):
-  args = cmisc.flatten(args)
-  for i in range(len(args) - 1):
-    args[i].connect_to(args[i + 1])
-  return args[-1]
-
-
-class ArraySink(ImageIO):
-
-  def __init__(self):
-    super().__init__(self)
-    self.tb = []
-
-  def end_stream(self):
-    return self.tb
-
-  def proc_impl(self, obj):
-    self.tb.append(obj)
-
-
-def pipe_process(inlist, *args, want_array=0):
-  args = cmisc.flatten(args)
-  res = None
-  args = list(args)
-  if want_array:
-    args.append(ArraySink())
-  for i in range(len(args) - 1):
-    args[i].connect_to(args[i + 1])
-
-  rx.from_(inlist).subscribe(args[0].push)
-  args[0].send_endstream()
-  return args[-1].res
-
-
-def tree_connect(root, tree_desc):
-  if isinstance(tree_desc, list):
-    if not tree_desc:
-      return root
-    root = tree_connect(root, tree_desc[0])
-    return tree_connect(root, tree_desc[1:])
-  elif isinstance(tree_desc, cmisc.A):
-    for child in tree_desc.children:
-      tree_connect(root, child)
-  else:
-    root.connect_to(tree_desc)
-    return tree_desc
-
-
-def tree_process(inlist, tree_desc):
-  src = IdIO()
-  tree_connect(src, tree_desc)
-  rx.from_(inlist).subscribe(src.src)
-
-
-class ImageProcessor(ImageIO):
-
-  def __init__(self):
-    super().__init__()
-
-  def get_hint_size(self, insize):
-    return insize
-
-  def process(self, i):
-    raise NotImplementedError()
-
-  def proc_impl(self, i):
-    return self(i)
-
-  def __call__(self, i):
-    if i is None:
-      return None
-    i = vispy_utils.ImageData.Make(i)
-    r = self.process(i)
-    return vispy_utils.ImageData.Make(r)
-
-  def chain(self, other):
-    return ChainedImageProcessor([self, other])
-
-
-class PixProcessor(ImageProcessor):
-
-  def __init__(self, f):
-    super().__init__()
-    self.f = f
-
-  def process(self, i):
-    i = i.img
-    if len(np.shape(i)) == 2:
-      vec = i.reshape(-1, 3)
-    else:
-      vec = i.reshape(-1, np.shape(i)[2])
-    res = self.f(vec)
-    return res.reshape(i.shape[:2])
-
-
-class ChainedImageProcessor(ImageProcessor):
-
-  def __init__(self, tb=[]):
-    super().__init__()
-    self.tb = list(tb)
-
-  def get_hint_size(self, insize):
-    for proc in self.tb:
-      insize = proc.get_hint_size(insize)
-    return insize
-
-  def process(self, i):
-    for proc in self.tb:
-      i = proc(i)
-    return i
-
-
-class FuncImageProcessor(ImageProcessor):
-
-  def __init__(self, f, hint_size=None, endf=None):
-    super().__init__()
-    self.f = f
-    self.hint_size = hint_size
-    self.endf = endf
-
-  def get_hint_size(self, insize):
-    return self.hint_size
-
-  def end_stream(self):
-    if self.endf:
-      return self.endf()
-
-  def process(self, i):
-    return self.f(i)
-
-class FuncCtxImageProcessor(FuncImageProcessor):
-
-  def __init__(self, f, ctx=A(), **kwargs):
-    super().__init__(f, **kwargs)
-    self.ctx = ctx
-    self.register_ctx(ctx)
-  def get_ctx(self):
-    res = A()
-    for k, v in self.ctx.items():
-      if isinstance(v, rx.core.Observable):
-        v = v.value
-      res[k] = v
-    return res
-
-
-  def process(self, i):
-    return self.f(i, self.get_ctx())
-
-kIdImageProc = FuncImageProcessor(lambda x: x)
 
 
 class RectAnnotator:
@@ -523,7 +286,6 @@ class DrawContext:
   def clear_objs(self):
     self.vctx.remove_objs(self.objs)
     self.objs = []
-
 
   def create_meshes(self, *args, **kwargs):
     return self.vctx.plot_meshes(*args, **kwargs).objs
@@ -751,9 +513,10 @@ class SingleChildW(QWidget):
 
 
 class FigWidget(SingleChildW):
+
   def __init__(self):
     super().__init__()
-    self.fig=  Fig()
+    self.fig = Fig()
     self.fig.create_native()
     self.set_single_child(self.fig.native)
 
@@ -966,27 +729,6 @@ def stream_mean():
 
   return FuncImageProcessor(acc, endf=endf)
 
-
-class MetricWidget(QtWidgets.QLabel, ImageIO):
-  def __init__(self, name):
-    super().__init__()
-    self.setAutoFillBackground(True)
-    self.name = name
-    self.v = None
-    self.refresh()
-
-  def refresh(self):
-    self.setText(f'{self.name}: {self.v}')
-    self.setAlignment(QtCore.Qt.AlignCenter)
-
-  def proc_impl(self, v):
-    self.v = v
-    self.refresh()
-  @staticmethod
-  def Make(name=None, obs=None):
-    res =  MetricWidget(name)
-    ImageIO.Connect(obs, res)
-    return res
 
 def test(ctx):
   win, app = create_window(ctx)

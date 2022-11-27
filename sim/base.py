@@ -15,7 +15,6 @@ from chdrft.geo.satsim import TileGetter
 import mercantile
 from chdrft.utils.math import MatHelper, rad2deg, deg2rad, rot_look_at, perspective
 from chdrft.utils.geo import *
-from chdrft.display.render import ImageGrid
 
 from chdrft.struct.base import Box, g_unit_box
 import chdrft.struct.base as opa_struct
@@ -488,6 +487,7 @@ class Renderer:
   def process(self, tl, no_render=None, outfile=None):
     imgs = []
     need_imgs  = outfile or not no_render
+    from chdrft.display.render import ImageGrid
     for i, t in enumerate(tl):
       self.configure_at(t)
       state = self.state_cb(self.cur_data, A(t=t, idx=i))

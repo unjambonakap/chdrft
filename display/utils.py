@@ -1,6 +1,5 @@
 #!/usr/bin/env python
 
-
 from IPython.utils.frame import extract_module_locals
 from asq.initiators import query as asq_query
 from enum import Enum
@@ -43,7 +42,4 @@ import chdrft.display.base
 import chdrft.dsp.dataop as DataOp
 import chdrft.utils.misc as cmisc
 import chdrft.utils.misc as cmisc
-
-
-
 

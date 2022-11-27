@@ -484,7 +484,7 @@ class MainWindow(QMainWindow):
     self.setWindowTitle(title)
     self.closed = rx.subject.BehaviorSubject(False)
     if main is not None:
-      self.setCentralWidget(main)
+      self.setup(main)
 
   def closeEvent(self, ev):
     print('CLOSING ', ev)
@@ -575,7 +575,6 @@ def qt_dialog(parent, name, default='', typ=None):
   return res
 
 def create_app(ctx=dict()):
-  print('CREATING AP')
   app = QApplication.instance()
   if app is None:
     # needs to be stored otherwise GCed

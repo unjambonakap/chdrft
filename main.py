@@ -1,14 +1,16 @@
 import inspect
+import pdb
 import argparse
-from chdrft.utils.misc import is_python2, Attr
 import glog
 import logging
 import sys
 import os
 import shlex
+from chdrft.config.base import is_python2
+import numpy as np
+import random
 
 if not is_python2:
-  from chdrft.utils.cache import *
   from contextlib import ExitStack
   import argcomplete
 
@@ -24,6 +26,7 @@ class App:
       self.global_context = ExitStack()
 
   def setup_jup(self, cmdline='', **kwargs):
+    from chdrft.utils.misc import Attr
     argv = shlex.split(cmdline)
     self(force=1, argv=argv, **kwargs, keep_open_context=1)
     self.setup = True
@@ -44,11 +47,13 @@ class App:
     parser = argparse.ArgumentParser(
         formatter_class=argparse.ArgumentDefaultsHelpFormatter)
     parser.add_argument('--verbosity', type=str, default='ERROR')
+    parser.add_argument('--pdb', action='store_true')
     parser.add_argument('--log_file', type=str)
     parser.add_argument('--runid', type=str, default='default')
     want_cache = force or ('cache' in f.f_globals and not is_python2)
     cache = None
     if want_cache:
+      from chdrft.utils.cache import cache_argparse
       cache_argparse(parser)
 
     if 'args' in f.f_globals:
@@ -56,6 +61,9 @@ class App:
       args_func(parser)
     for x in parser_funcs: x(parser)
 
+
+    random.seed(0)
+    np.random.seed(0)
 
 
     parser.add_argument('other_args', nargs=argparse.REMAINDER, default=['--'])
@@ -77,6 +85,7 @@ class App:
       f.f_globals['flags'] = flags
 
     if want_cache:
+      from chdrft.utils.cache import FileCacheDB
       self.cache = FileCacheDB.load_from_argparse(flags)
       f.f_globals['cache'] = self.cache
 
@@ -84,14 +93,25 @@ class App:
       self.stack.close()
 
     main_func = f.f_globals.get('main', None)
-    if is_python2:
-      main_func()
+    def go():
+      try:
+        if is_python2:
+          main_func()
+        else:
+          if keep_open_context:
+            stack = ExitStack()
+            self.run(stack, main_func)
+          with ExitStack() as stack:
+            self.run(stack, main_func)
+      except Exception as e:
+        if flags.pdb:
+          pdb.post_mortem()
+        raise
+
+    if flags.pdb:
+      pdb.runcall(go)
     else:
-      if keep_open_context:
-        stack = ExitStack()
-        self.run(stack, main_func)
-      with ExitStack() as stack:
-        self.run(stack, main_func)
+      go()
       self.stack = None
 
 

@@ -1,4 +1,4 @@
 work/
-.pyc
 __pycache__/
-*.db.pickle*
+.pyc
+.chdrft.*

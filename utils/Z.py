@@ -91,5 +91,3 @@ import chdrft.utils.misc as cmisc
 
 
 
-np.set_printoptions(edgeitems=30, linewidth=120,
-    formatter=dict(float=lambda x: "%.03f" % x))

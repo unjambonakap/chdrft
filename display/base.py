@@ -2,6 +2,7 @@
 
 import os
 from chdrft.config.env import g_env
+
 qt_imports = g_env.get_qt_imports_lazy()
 import pyqtgraph as pg
 from chdrft.config.env import g_env, qt_imports
@@ -19,9 +20,11 @@ import chdrft.utils.geo as geo_utils
 import pymap3d
 import meshio
 
+
 class Consts:
   EARTH_ELLIPSOID = pymap3d.Ellipsoid('wgs84')
   MOON_ELLIPSOID = pymap3d.Ellipsoid('moon')
+
 
 class Quad:
 
@@ -29,7 +32,7 @@ class Quad:
     self.box = box
     self.depth = depth
     self._children = None
-    self.parent= parent
+    self.parent = parent
 
   @property
   def children(self):
@@ -55,7 +58,7 @@ class TMSQuad:
     self.x = x
     self.y = y
     self.z = z
-    self.u2s=u2s
+    self.u2s = u2s
     self._children = None
     self.parent = parent
     self.depth = z
@@ -66,7 +69,11 @@ class TMSQuad:
       self._children = []
       if self.z + 1 < TMSQuad.MAX_DEPTH:
         for i in range(4):
-          self._children.append(TMSQuad(2 * self.x + (i & 1), 2 * self.y + (i >> 1), self.z + 1, self.u2s, parent=self))
+          self._children.append(
+              TMSQuad(
+                  2 * self.x + (i & 1), 2 * self.y + (i >> 1), self.z + 1, self.u2s, parent=self
+              )
+          )
     return self._children
 
   def __iter__(self):
@@ -82,7 +89,8 @@ class TMSQuad:
   def quad_ecef(self):
     p = self.box_latlng.poly()
     return opa_struct.Quad(
-        np.stack(pymap3d.geodetic2ecef(p[:, 1], p[:, 0], 0, ell=Consts.EARTH_ELLIPSOID), axis=-1) * self.u2s
+        np.stack(pymap3d.geodetic2ecef(p[:, 1], p[:, 0], 0, ell=Consts.EARTH_ELLIPSOID), axis=-1) *
+        self.u2s
     )
 
   @property
@@ -95,9 +103,9 @@ class TMSQuad:
   @staticmethod
   def Root(u2s):
     return TMSQuad(0, 0, 0, u2s)
-  def __str__(self): return f'xyz={self.xyz}'
 
-
+  def __str__(self):
+    return f'xyz={self.xyz}'
 
 
 class TriangleActorBase:
@@ -134,9 +142,8 @@ class TriangleActorBase:
     self.points.extend(obj.points)
 
     for x in obj.cells:
-      self.trs.extend(x.data+self.npoints)
+      self.trs.extend(x.data + self.npoints)
     self.npoints += len(obj.points)
-
 
   def add_triangle(self, pts, tex_coords=[]):
     pids = self.add_points(pts)
@@ -190,9 +197,8 @@ class TriangleActorBase:
   def _build_impl(self, tex):
     pass
 
-
   def tr_line(self, tr):
-    return [self.points[tr[i%3]] for i in range(4)]
+    return [self.points[tr[i % 3]] for i in range(4)]
 
   @property
   def lines(self):
@@ -207,4 +213,3 @@ class TriangleActorBase:
     from vispy.geometry.meshdata import MeshData
     assert len(self.points) > 0
     return MeshData(vertices=self.points, faces=self.trs)
-

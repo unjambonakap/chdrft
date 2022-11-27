@@ -248,7 +248,6 @@ class ManifoldWalker:
     assert self.coords.is_inside(startp)
     print(startp)
     p = self.pt_to_sol(startp)
-    print('STAART ', p, self.froot(p))
 
     q = SimpleQueue()
     self.kdtree.append(p)

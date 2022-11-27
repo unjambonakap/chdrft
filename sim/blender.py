@@ -10,7 +10,8 @@ import numpy as np
 from chdrft.utils.types import *
 from chdrft.sim.moon_sunrise import *
 from chdrft.display.blender import *
-from chdrft.sim.phys import RigidBody, SurfaceMeshParams
+from chdrft.sim.rb.rb_gen import RigidBody
+from chdrft.sim.rb.base import SurfaceMeshParams
 import chdrft.utils.colors as color_utils
 
 global flags, cache
@@ -132,8 +133,8 @@ class MoonSunriseBlender(MoonSunrise):
     bpy.ops.render.render(write_still=True)
 
 
-
 class ObjectSync:
+
   def __init__(self, src, dest):
     self.src = src
     self.dest = dest
@@ -158,10 +159,22 @@ class BlenderPhysHelper:
     bpy.context.scene.collection.children.link(self.env_col)
     bpy.context.scene.collection.children.link(self.main_col)
     self.cam = self.create_camera()
+    self.sctx: SceneContext = None
+    self._objs: RigidBody = []
 
-  def update(self):
+  def update(self, animation: AnimationSceneHelper = None):
     # needed for recomputing matrix_world
-    bpy.context.view_layer.update()
+    #bpy.context.view_layer.update()
+
+    updates = []
+    for child in self.sctx.obj2name.keys():
+      updates.append(KeyframeObjData(obj=self.obj2blender[child], wl=child.self_link.wl.data))
+    updates.append(KeyframeObjData(obj=self.cam, wl=self.cam.mat_world))
+    for x in updates:
+      x.propagate()
+
+      #osync.sync()
+    if animation: animation.push(updates)
 
   def create_camera(self) -> BlenderObjWrapper:
     cobj = bpy.data.cameras.new('Camera')
@@ -179,6 +192,8 @@ class BlenderPhysHelper:
     res = self.create_from_obj(obj)
     self.cmap = color_utils.ColorMapper(self.obj2blender.keys())
     self.load_positions()
+    self.sctx = obj.ctx
+    self._objs.append(obj)
 
     for obj, bobj, in self.obj2blender.items():
       self.main_col.objects.link(bobj.internal)

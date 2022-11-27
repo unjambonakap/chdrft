@@ -8,7 +8,9 @@ import glob
 import os
 import os.path
 import re
+import traceback as tb
 
+import time
 from jupyter_core.paths import jupyter_runtime_dir, jupyter_path
 from ipykernel.kernelapp import IPKernelApp
 from notebook.services.kernels.kernelmanager import MappingKernelManager
@@ -24,22 +26,58 @@ from ipython_genutils.py3compat import unicode_type
 from jupyter_client.manager import KernelManager
 
 from jupyter_client.ioloop import IOLoopKernelManager
+import asyncio
 
 from traitlets import default, Integer, Unicode, Instance
 import json
+from chdrft.utils.path import FileFormatHelper
+import subprocess as sp
+import shlex
+import os, signal
+from enum import Enum
 
-
-class Object(object):
-  pass
+import chdrft.utils.misc as cmisc
+class KernelKind(str, Enum):
+  BLENDER='blender'
+  OTHER='other'
 
 
 kRunId = 'runid'
 kDate = 'date'
 kData = 'data'
+kKind = 'kind'
 kPid = 'pid'
 kKernelFile = 'kernel_file'
 kNamePrefix = 'kernel_'
 
+
+class ProcHelper:
+
+  def __init__(self, pid):
+    self.pid = pid
+    base = f'/proc/{pid}'
+    try:
+      self.cmdline = FileFormatHelper.Read(f'{base}/cmdline').strip(b'\x00').split(b'\x00')
+      self.cwd = os.path.realpath(f'{base}/cwd')
+      self.active = True
+    # TODO: environ
+    except:
+      self.active = False
+
+  @cmisc.logged_failsafe
+  def duplicate(self):
+    print(self.cmdline)
+    sp.Popen([x.decode() for x in self.cmdline], cwd=self.cwd, stdout=sp.PIPE, stderr=sp.STDOUT)
+
+  @cmisc.logged_failsafe
+  def kill(self):
+    assert self.active
+    os.kill(self.pid, signal.SIGKILL)
+
+  @cmisc.logged_failsafe
+  def interrupt(self):
+    assert self.active
+    os.kill(self.pid, signal.SIGINT)
 
 
 class OpaEntryKernelManager(MappingKernelManager):
@@ -56,6 +94,10 @@ class OpaEntryKernelManager(MappingKernelManager):
     for port_name in port_names:
       setattr(kernel, port_name, 0)
     kernel.load_connection_file(connection_fname)
+
+
+  def get_kernel(self, kid):
+    return self._kernels[kid]
 
   @gen.coroutine
   def start_kernel(self, kernel_name=None, **kwargs):
@@ -82,13 +124,28 @@ class OpaEntryKernelManager(MappingKernelManager):
     else:
       return super().start_kernel(kernel_name=kernel_name, **kwargs)
 
-  def restart_kernel(self, kernel_id=None):
-    assert 0
+  async def restart_kernel(self, kernel_id=None):
+    try:
+      k = self._kernels.pop(kernel_id) 
+      k.request_shutdown(restart=True)
+      self.start_kernel(k.kernel_name)
+    except Exception as e:
+      tb.print_exception(e)
+      print('failed to restart kernel')
+      #self._kernel_connections.pop(kernel_id, None)
 
   def shutdown_kernel(self, kernel_id, now=False, restart=False):
     try:
-      super().shutdown_kernel(kernel_id, now, restart)
-    except:
+
+      print('SHUTDOWN')
+      super().shutdown_kernel(kernel_id, now, restart=False)
+      print('DONE SHUTDOWN')
+      k = self._kernels.pop(kernel_id) 
+      k.ph.duplicate()
+      self.start_kernel(k.kernel_name)
+
+    except Exception as e:
+      tb.print_exception(e)
       print('failed to shutdown normally')
       self._kernel_connections.pop(kernel_id, None)
 
@@ -133,9 +190,12 @@ class OpaEntryKernelManager(MappingKernelManager):
     print('KERNEL LIST >> ', res)
     return res
 
+
 def norm_date(date):
-  if date.endswith('0Z'): date=date[:-2]
+  if date.endswith('0Z'): date = date[:-2]
   return datetime.datetime.fromisoformat(date)
+
+
 def list_kernels(connection_dir):
   kv = {}
   kernels_by_runid = defaultdict(lambda: {kDate: datetime.datetime.min})
@@ -146,7 +206,6 @@ def list_kernels(connection_dir):
       if not kRunId in con: continue
       con[kDate] = norm_date(con[kDate])
       con[kKernelFile] = conn_fname
-      print(con)
       con['filename'] = conn_fname
       runid = con[kRunId]
       if kernels_by_runid[runid][kDate] < con[kDate]:
@@ -163,12 +222,12 @@ def list_kernels(connection_dir):
 class OpaKernelSpecManager(KernelSpecManager):
 
   conn_dir = Unicode(config=True, default_value=jupyter_runtime_dir())
+
   def __init__(self, *args, **kwargs):
     super().__init__(*args, **kwargs)
 
   @property
   def mod_kernels(self):
-    print('LIsting at ', self.conn_dir)
     return list_kernels(self.conn_dir)
 
   def get_all_specs(self):
@@ -180,7 +239,6 @@ class OpaKernelSpecManager(KernelSpecManager):
     return res
 
   def get_kernel_spec(self, kernel_name):
-    print('LAAA ', kernel_name, kNamePrefix)
     if not kernel_name.startswith(kNamePrefix):
       return super().get_kernel_spec(kernel_name)
 
@@ -188,7 +246,6 @@ class OpaKernelSpecManager(KernelSpecManager):
       raise NoSuchKernel(kernel_name)
 
     cur = self.mod_kernels[kernel_name]
-    print(cur)
 
     res = KernelSpec()
     res.display_name = kernel_name
@@ -196,7 +253,29 @@ class OpaKernelSpecManager(KernelSpecManager):
     return res
 
 
+from ipykernel.ipkernel import IPythonKernel
+from traitlets import Type
+
+
+class OKernel(IPythonKernel):
+
+  def __init__(*args, **kwargs):
+    print('CREATE OKERNEL')
+    super().__init__(*args, **kwargs)
+
+  def do_shutdown(self, restart):
+    print('OK restart down', os.getpid())
+    assert 0
+    return dict(status="ok", restart=restart)
+
+
 class OpaKernelApp(IPKernelApp):
+
+  #kernel_class = Type(
+  #    OKernel,
+  #    klass="ipykernel.kernelbase.Kernel",
+  #    help="The Kernel subclass to be used."
+  #)
 
   def write_connection_file(self):
     """write connection info to JSON file"""
@@ -209,16 +288,21 @@ class OpaKernelApp(IPKernelApp):
       con[kPid] = os.getpid()
       con[kDate] = datetime.datetime.now().isoformat()
       con[kRunId] = self.runid
+      con[kKind] = self._kind
       json.dump(con, f, indent=2)
       f.truncate()
 
 
 class FakeKernel:
+
   def __init__(self, pid):
     self.pid = pid
 
   def send_signal(self, signum):
+    print('SEND SIG ', self.pid, signum)
+
     pass
+
 
 class OpaKernelManager(IOLoopKernelManager):
 
@@ -226,25 +310,40 @@ class OpaKernelManager(IOLoopKernelManager):
     super().__init__(*args, **kwargs)
 
   def start_restarter(self):
-    print('gogo restart')
     super().start_restarter()
 
   def start_kernel(self, **kw):
     self.start_restarter()
-    print('starting kernel')
-    print(self.kernel_spec_manager.get_kernel_spec)
-    print(self.kernel_spec_manager.get_kernel_spec(self.kernel_name))
-    print(self.kernel_spec.metadata)
+    self.ready.set_result(True)
     self.load_connection_file(self.kernel_spec.metadata[kKernelFile])
 
     self._connect_control_socket()
     info = self.kernel_spec.metadata
-    self.kernel = FakeKernel(info.get(kPid, -1))
+    print('starting kernel', info)
+    self._pid = info.get(kPid, -1)
+    self._kind = info.get(kKind, "")
+    self.kernel = FakeKernel(self._pid)
+    self.ph = ProcHelper(self._pid)
+
+  def interrupt_kernel(self):
+    self.ph.interrupt()
 
   def request_shutdown(self, restart=False):
+    if self._kind == KernelKind.BLENDER:
+      self.ph.kill()
+      if not restart: return
+      self.ph.duplicate()
+      for i in range(10):
+        ksm = OpaKernelSpecManager(parent=self.parent)
+        spec = ksm.get_kernel_spec(self.kernel_name)
+        print('TRY ', i)
+        time.sleep(2)
+        ph = ProcHelper(spec.metadata[kPid])
+        if ph.active: break
+
     pass
 
-  def finish_shutdown(self, waittime=None, pollinterval=0.1):
+  def finish_shutdown(self, waittime=None, pollinterval=0.1, **kwargs):
     pass
 
   def cleanup(self, connection_file=True):
