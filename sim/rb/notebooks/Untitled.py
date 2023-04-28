@@ -10,35 +10,83 @@ from chdrft.sim.rb.blender_helper import g_bh
 from chdrft.sim.rb.ctrl import RBSolver
 
 
-# In[12]:
+# In[8]:
 
 
-g_bh.load_scene(scene_gyro_wheel_idx, qd0=np.array([0,0,0,10]), cparams = ControlParameters(ndt_const=1, dt=1e-2, integ_nsteps=1, nt=5, use_jit=1))
+g_bh.stop_sim()
 
 
-# In[11]:
+# # Gyroscope
+
+# In[3]:
 
 
-g_bh.i0
+g_bh.load_scene(scene_gyro_wheel_idx, qd0=np.array([0,0,0,10]), cparams = ControlParameters(ndt_const=1, dt=0.8e-2, integ_nsteps=1, nt=5, use_jit=1))
+i02 = g_bh.i0.copy()
+i02.qd = np.array([0,0,0,6])
+g_bh.sim.load_state(i02)
 
 
-# In[13]:
+# In[4]:
 
 
-g_bh.sim.load_state(g_bh.i0)
 g_bh.run_sim(override_ctrl=g_bh.sim.ss.ctrl_packer.default)
+
+
+# # T handle
+
+# In[6]:
+
+
+g_bh.load_scene(scene_T_idx, qd0 = np.array([0, 0, 0, 10, 0, 0.01]), cparams = ControlParameters(ndt_const=1, dt=1e-2, integ_nsteps=100, nt=5, use_jit=1))
+g_bh.sim.load_state(g_bh.i0)
+print(g_bh.ctrl.mom)
 
 
 # In[7]:
 
 
+g_bh.i0.qd = np.array([0, 0, 0, 10, 0, 0.01])
+g_bh.ctrl.s0.precision = 50
+g_bh.fspec.spec.cparams.use_rk4=True
+g_bh.sim.load_state(g_bh.i0)
+g_bh.ctrl.s0.fix_mom=1
+g_bh.ctrl.mom=None
+g_bh.run_sim(override_ctrl=g_bh.sim.ss.ctrl_packer.default)
+
+
+# # Reaction wheels
+
+# In[17]:
+
+
+g_bh.load_scene(control_simple_idx3, qd0 = np.array([0, 0, 0, 0,0,0,1,2,3]), cparams = ControlParameters(ndt_const=1, dt=1e-2, integ_nsteps=1, nt=5, use_jit=1))
+
+
+# In[10]:
+
+
+g_bh.ctrl.mom.v
+
+
+# In[19]:
+
+
 g_bh.stop_sim()
 
 
-# In[ ]:
+# In[20]:
 
 
-g_bh.stop_sim()
+i02 = g_bh.i0.copy()
+i02.qd = np.array([0,0,0,1,0,0,1,2,3])
+g_bh.sim.load_state(i02)
+
+
+# In[21]:
+
+
+g_bh.run_sim(override_ctrl=np.zeros(3))
 
 
 # In[ ]:
@@ -62,7 +110,7 @@ g_bh.load_scene(box_scene, cparams = cparams)
 solver = RBSolver(spec=spec, solver_params=SolverParameters(time_ctrl_count=3))
 
 
-# In[2]:
+# In[19]:
 
 
 g_bh.load_scene(control_simple_idx3, qd0 = np.array([0, 0, 0, 0,0,0,1,2,3]), cparams = ControlParameters(ndt_const=1, dt=1e-2, integ_nsteps=1, nt=5, use_jit=0))

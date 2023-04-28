@@ -29,6 +29,7 @@ from pydantic import BaseModel, Field, Extra
 import pydantic
 import pandas as pd
 from functools import cached_property
+import pickle
 
 from typing import no_type_check
 from copy import deepcopy
@@ -1901,6 +1902,7 @@ except Exception as e:
   glog.error(e)
   pass
 
+
 class cached_classproperty(object):
   """
     A property that is only computed once per class and then replaces
@@ -1921,6 +1923,8 @@ class cached_classproperty(object):
     setattr(cls, self.func.__name__, value)
     return value
 
+def make_class_kwargs(cl, kwargs):
+  return cl(**kwargs)
 
 class PatchedModel(
     BaseModel,
@@ -1942,8 +1946,6 @@ class PatchedModel(
         res.add(k)
     return res
 
-
-
   def dict(self, *args, exclude=None, **kwargs):
     if exclude is None: exclude = {}
     for k in self.__excluded_keys():
@@ -1955,9 +1957,8 @@ class PatchedModel(
 
   def __reduce_ex__(self, _):
     ex = self.__excluded_keys()
-    res = {k:v for k,v in self.__dict__.items() if k not in ex}
-    return (lambda: self.__class__(**res), ())
-
+    res = {k: v for k, v in self.__dict__.items() if k not in ex}
+    return (make_class_kwargs, (self.__class__, res))
 
   def __eq__(self, peer):
     return id(self) == id(peer)
@@ -1985,7 +1986,6 @@ class PatchedModel(
         raise e
 
 
-
 class PydanticHandler(jsonpickle.handlers.BaseHandler):
 
   def flatten(self, obj, data):
@@ -2006,4 +2006,3 @@ jsonpickle.handlers.register(BaseModel, PydanticHandler, base=True)
 jsonpickle.handlers.register(pd.Timestamp, PDTimestampHandler, base=True)
 jsonpickle.handlers.register(pd.Timedelta, PDTimestampHandler, base=True)
 PDTimestampHandler.handles(pd.Timedelta)
-

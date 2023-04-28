@@ -58,8 +58,14 @@ class ActorType(cmisc.Enum):
 
 
 def set_analysis_parameters(ctx, analysis, large=False):
-  polar_model = [cmisc.path_here('./notebooks//north.small.stl'), cmisc.path_here('./notebooks/north.large.stl')][large]
-  earthrise_model = [cmisc.path_here('./notebooks/t1.small.stl'), cmisc.path_here('./notebooks/t1.large.stl')][large]
+  polar_model = [
+      cmisc.path_here('./notebooks//north.small.stl'),
+      cmisc.path_here('./notebooks/north.large.stl')
+  ][large]
+  earthrise_model = [
+      cmisc.path_here('./notebooks/t1.small.stl'),
+      cmisc.path_here('./notebooks/t1.large.stl')
+  ][large]
   ctx.polar_mode = 0
   ctx.obs_conf = A(obs='LRO', obs_frame='LRO_LROCNACL')
   if analysis == 'polar':
@@ -67,7 +73,7 @@ def set_analysis_parameters(ctx, analysis, large=False):
     ctx.moon_model = polar_model
     t0 = norm_date('2014-02-01T12:25:00') + datetime.timedelta(seconds=10)
     ctx.view_angle = 41.9
-    ctx.rot_angle = -np.pi/2
+    ctx.rot_angle = -np.pi / 2
   elif analysis == 'lro_earthrise':
     ctx.moon_model = earthrise_model
     t0 = norm_date('2015-10-12 12:18:30')
@@ -81,7 +87,8 @@ def set_analysis_parameters(ctx, analysis, large=False):
     ctx.obs_conf = A(obs='SELENE', obs_frame='SELENE_HDTV_WIDE')
     ctx.rot_angle = -np.pi
     ctx.view_angle = 29.45
-  else: assert 0
+  else:
+    assert 0
   ctx.t0 = t0
 
 
@@ -204,11 +211,12 @@ class MoonSunrise:
     return 'earth'
 
   def create_earth_actor(self):
-    tg = TileGetter()
-    u = SimpleVisitor(
-        tg, self.actor_class, self.ctx.earth_depth, tile_depth=self.ctx.earth_tile_depth
+    u = create_earth_actors(
+        self.actor_class,
+        self.ctx.earth_depth,
+        tile_depth=self.ctx.earth_tile_depth,
+        params=TMSQuadParams(m2u=self.m2u)
     )
-    do_visit(TMSQuad.Root(self.m2u), u)
     return A(internal=u, obj=self.create_earth_actor_impl(u))
 
   def create_moon_actor_impl(self, u):

@@ -58,6 +58,7 @@ from scipy.spatial import distance
 import matplotlib.pyplot as plt
 
 from chdrft.display.service import g_plot_service
+from chdrft.display.service import g_plot_service as oplt
 from chdrft.dsp.datafile import DataFile, Dataset, DynamicDataset, Dataset2d, Sampler1D
 import chdrft.dsp.dataop as DataOp
 from chdrft.tube.connection import Connection, Server

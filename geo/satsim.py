@@ -58,13 +58,15 @@ class TileGetter(ExitStack):
     return res
 
   @Cachable.cached()
-  def get_tile(self, x=None, y=None, z=None):
+  def get_tile(self, x=None, y=None, z=None) -> np.ndarray:
     glog.info(f'Querying tile x={x}, y={y}, z={z}')
     res = self.get_tile_base(x, y ,z)
     rimg = np.array([[[255,0,0]]], dtype=np.uint8)
     read = res.raw.read()
     buf = np.frombuffer(read, dtype=np.uint8)
-    return cv2.imdecode(buf, cv2.IMREAD_UNCHANGED)
+    img =  cv2.imdecode(buf, cv2.IMREAD_UNCHANGED)
+    if img is None: return np.zeros((256, 256, 3), dtype=np.uint8)
+    return cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
 
 
   def get_tile_file(self, x=None, y=None, z=None):
@@ -78,11 +80,12 @@ class TileGetter(ExitStack):
       shutil.copyfileobj(res.raw, f)
     sp.check_output(['convert', out_fname, out_fname2])
 
+gl = opa_cache.Proxifier(Nominatim, user_agent='VGYV7gGlNoWapA==')
+
 
 def test(ctx):
   tg = TileGetter()
   tl =tg.get_tile(0,0,0)
-  gl = opa_cache.Proxifier(Nominatim, user_agent='VGYV7gGlNoWapA==')
   obj = gl.geocode('Paris')
   print(obj)
   print(len(tl))

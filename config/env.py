@@ -92,12 +92,14 @@ g_env = Env()
 qt_imports = g_env.get_qt_imports_lazy()
 
 
-def init_jupyter():
+def init_jupyter(run_app=False):
   from IPython.core.display import display, HTML
   display(HTML("<style>.container { width:90% !important; }</style>"))
   from chdrft.main import app
   import atexit
   atexit.register(app.exit_jup)
+  if run_app:
+    app(force=True, argv=[])
 
   import numpy as np
   import sys

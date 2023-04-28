@@ -10,8 +10,9 @@ import numpy as np
 from chdrft.utils.types import *
 from chdrft.sim.moon_sunrise import *
 from chdrft.display.blender import *
+from chdrft.display.blender import BlenderTriangleActor
 from chdrft.sim.rb.rb_gen import RigidBody
-from chdrft.sim.rb.base import SurfaceMeshParams
+from chdrft.sim.rb.base import SurfaceMeshParams, Vec3, AABB, Transform
 import chdrft.utils.colors as color_utils
 
 global flags, cache
@@ -34,6 +35,19 @@ def find_node_io(nt, name, node_name=None, out=None):
 def find_node(nt, name):
   tg = cmisc.asq_query(nt.nodes).where(lambda x: x.name == name).single_or_default(None)
   return tg
+
+
+def actors_to_obj(name, col, actors: list[BlenderTriangleActor]):
+  res = make_group(name, col, [x.obj for x in actors])
+  locs = []
+  for x in actors:
+    locs.append(Vec3(np.array(x.obj.location)))
+    create_material_for_obj(x.obj, x.tex, f'{name}_{x.name}')
+  mean_pos = np.mean(locs)
+  res.location = mean_pos.vdata
+  for p, x in zip(locs, actors):
+    x.obj.location = (p - mean_pos).vdata
+  return res
 
 
 class MoonSunriseBlender(MoonSunrise):
@@ -103,10 +117,7 @@ class MoonSunriseBlender(MoonSunrise):
 
   def create_earth_actor_impl(self, u):
     name = 'earth'
-    res = make_group(name, self.obj_col, [x.obj for x in u.actors])
-    for x in u.actors:
-      create_material_for_obj(x.obj, x.tex, f'{name}_{x.name}')
-    return res
+    return actors_to_obj(name, self.obj_col, u.actors)
 
   def create_moon_actor_impl(self, ta):
     moon = ta.obj
@@ -150,8 +161,10 @@ class ObjectSync:
 
 class BlenderPhysHelper:
 
-  def __init__(self):
+  def __init__(self, scale: float = 1, shift_p: Vec3 = Vec3.Zero()):
     clear_scene()
+    self.scale = scale
+    self.shift_p = shift_p
     self.obj2blender: dict[RigidBody, BlenderObjWrapper] = dict()
     self.main_col = bpy.data.collections.new('obj_col')
     self.env_col = bpy.data.collections.new('env_col')
@@ -162,23 +175,43 @@ class BlenderPhysHelper:
     self.sctx: SceneContext = None
     self._objs: RigidBody = []
 
-  def update(self, animation: AnimationSceneHelper = None):
+
+  def update_context(self):
+    bpy.context.view_layer.update()
+
+  def update(self, animation: AnimationSceneHelper = None, pre_cam_cb=None):
     # needed for recomputing matrix_world
-    #bpy.context.view_layer.update()
+    self.update_context()
 
     updates = []
     for child in self.sctx.obj2name.keys():
-      updates.append(KeyframeObjData(obj=self.obj2blender[child], wl=child.self_link.wl.data))
-    updates.append(KeyframeObjData(obj=self.cam, wl=self.cam.mat_world))
+      updates.append(
+          KeyframeObjData(
+              obj=self.obj2blender[child],
+              wl=child.self_link.wl.shift(self.shift_p).scale_p(self.scale).data
+          )
+      )
+
     for x in updates:
       x.propagate()
 
+    self.update_context()
+    if pre_cam_cb is not None:
+      pre_cam_cb()
+
+
+    cam_up = KeyframeObjData(obj=self.cam, wl=self.cam.mat_world)
+    cam_up.propagate()
+    updates.append(cam_up)
       #osync.sync()
     if animation: animation.push(updates)
+
 
   def create_camera(self) -> BlenderObjWrapper:
     cobj = bpy.data.cameras.new('Camera')
     cam = bpy.data.objects.new('Camera', cobj)
+    cam.data.clip_start = 1e-4
+    cam.data.clip_end = 1e6
     self.env_col.objects.link(cam)
     bpy.context.scene.camera = cam
     return BlenderObjWrapper(cam)
@@ -201,7 +234,9 @@ class BlenderPhysHelper:
 
   def create_from_obj(self, obj: RigidBody) -> BlenderTriangleActor:
     actor = BlenderTriangleActor.BuildFrom(
-        obj.spec.mesh.surface_mesh(SurfaceMeshParams()), name=obj.name
+        obj.spec.mesh.surface_mesh(SurfaceMeshParams()),
+        name=obj.name,
+        scale=self.scale,
     )
     obj_blender = BlenderObjWrapper(actor.blender_obj)
     self.obj2blender[obj] = obj_blender
@@ -212,7 +247,26 @@ class BlenderPhysHelper:
 
   def load_positions(self):
     for obj, bobj, in self.obj2blender.items():
-      bobj.mat_local = obj.self_link.wl.data
+      bobj.mat_local = obj.self_link.wl.scale_p(self.scale).data
+
+  def set_cam_focus(self, points, dv_rel: Vec3 = None, dv_abs: Vec3 = None, expand=0) -> Transform:
+
+    aabb = AABB.FromPoints(np.array(points))
+
+    if dv_abs is None:
+      dv_abs = dv_rel * Vec3(aabb.v)
+    cam_loc = Vec3.Pt(aabb.center) + dv_abs
+    cam_params = compute_cam_parameters(
+        cam_loc.vdata,
+        aabb.center,
+        Vec3.Z().vdata,
+        aabb.points[:, :3],
+        blender=True,
+        expand=expand,
+    )
+    self.cam.data.angle_y = cam_params.angle_box.yn
+    self.cam.mat_world = cam_params.toworld.data
+    return cam_params.toworld
 
 
 def test1():

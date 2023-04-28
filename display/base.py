@@ -21,92 +21,6 @@ import pymap3d
 import meshio
 
 
-class Consts:
-  EARTH_ELLIPSOID = pymap3d.Ellipsoid('wgs84')
-  MOON_ELLIPSOID = pymap3d.Ellipsoid('moon')
-
-
-class Quad:
-
-  def __init__(self, box, depth, parent=None):
-    self.box = box
-    self.depth = depth
-    self._children = None
-    self.parent = parent
-
-  @property
-  def children(self):
-    if self._children is None:
-      self._children = []
-      for qd in self.box.quadrants:
-        self._children.append(Quad(qd, self.depth + 1, self))
-    return self._children
-
-  def __iter__(self):
-    return iter(self.children)
-
-  @staticmethod
-  def Root():
-    return Quad(opa_struct.g_unit_box, 0)
-
-
-class TMSQuad:
-  LMAX = 85.05113
-  MAX_DEPTH = 20
-
-  def __init__(self, x, y, z, u2s, parent=None):
-    self.x = x
-    self.y = y
-    self.z = z
-    self.u2s = u2s
-    self._children = None
-    self.parent = parent
-    self.depth = z
-
-  @property
-  def children(self):
-    if self._children is None:
-      self._children = []
-      if self.z + 1 < TMSQuad.MAX_DEPTH:
-        for i in range(4):
-          self._children.append(
-              TMSQuad(
-                  2 * self.x + (i & 1), 2 * self.y + (i >> 1), self.z + 1, self.u2s, parent=self
-              )
-          )
-    return self._children
-
-  def __iter__(self):
-    return iter(self.children)
-
-  @property
-  def box_latlng(self):
-    bounds = mercantile.bounds(*self.xyz)
-    box = Box(low=(bounds.west, bounds.south), high=(bounds.east, bounds.north))
-    return box
-
-  @property
-  def quad_ecef(self):
-    p = self.box_latlng.poly()
-    return opa_struct.Quad(
-        np.stack(pymap3d.geodetic2ecef(p[:, 1], p[:, 0], 0, ell=Consts.EARTH_ELLIPSOID), axis=-1) *
-        self.u2s
-    )
-
-  @property
-  def xyz(self):
-    return self.x, self.y, self.z
-
-  def tile(self, tg):
-    return tg.get_tile(*self.xyz)
-
-  @staticmethod
-  def Root(u2s):
-    return TMSQuad(0, 0, 0, u2s)
-
-  def __str__(self):
-    return f'xyz={self.xyz}'
-
 
 class TriangleActorBase:
 
@@ -182,10 +96,12 @@ class TriangleActorBase:
     self.tex_coords.extend(peer.tex_coords)
 
   @classmethod
-  def BuildFrom(cls, peer: "TriangleActorBase", **kwargs) -> "TriangleActorBase":
+  def BuildFrom(cls, peer: "TriangleActorBase", scale: float = None, **kwargs) -> "TriangleActorBase":
     self = cls(**kwargs)
     self.tex = peer.tex
     self.points = peer.points
+    if scale is not None:
+      self.points[:,:3] = self.points[:,:3] * scale
     self.tex_coords = peer.tex_coords
     self.trs = peer.trs
     self.obj = self._build_impl(self.tex)

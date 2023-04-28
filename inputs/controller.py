@@ -1,5 +1,6 @@
 #!/usr/bin/env python
 
+from __future__ import annotations
 from chdrft.cmds import CmdsList
 from chdrft.utils.misc import Attributize as A
 from chdrft.main import app
@@ -16,11 +17,17 @@ from pydantic import Field
 from chdrft.utils.path import FileFormatHelper
 from chdrft.dsp.utils import linearize_clamp
 from typing import Callable
+import enum
 
 global flags, cache
 flags = None
 cache = None
 
+class GamepadButtons(str, enum.Enum):
+  X = 'X'
+  Y = 'Y'
+  A = 'A'
+  B = 'B'
 
 def args(parser):
   clist = CmdsList()
@@ -42,18 +49,23 @@ class OGamepad(cmisc.PatchedModel):
   def set_led(self, value):
     FileFormatHelper.Write('/sys/class/leds/xpad0/brightness', str(value))
 
-  def __init__(self):
+  def __init__(self, num=0):
     super().__init__()
-    self.gp: Gamepad = Xbox360()
+    self.gp: Gamepad = Xbox360(num)
     self.axis2button = {
-      'DPAD-X': {-1: 'DPAD-LEFT', 1: 'DPAD-RIGHT'},
-      'DPAD-Y': {-1: 'DPAD-UP', 1: 'DPAD-DOWN'},
+        'DPAD-X': {
+            -1: 'DPAD-LEFT',
+            1: 'DPAD-RIGHT'
+        },
+        'DPAD-Y': {
+            -1: 'DPAD-UP',
+            1: 'DPAD-DOWN'
+        },
     }
 
     for x in self.axis2button.values():
       for k in x.values():
         self.register_button(k)
-
 
     def add_cb(name, axis=False):
       self.register_button(name)
@@ -77,7 +89,6 @@ class OGamepad(cmisc.PatchedModel):
 
     self.state[name] = pressed if val is None else val
 
-
     if val is None:
       self.state[(name, pressed)] = True
 
@@ -93,7 +104,6 @@ class OGamepad(cmisc.PatchedModel):
     self.gp.startBackgroundUpdates()
     self.push_state()
 
-
   def dispose(self):
     self.gp.disconnect()
     self.src.dispose()
@@ -101,10 +111,12 @@ class OGamepad(cmisc.PatchedModel):
 
 
 class InputControllerParameters(cmisc.PatchedModel):
-  map: Callable[[int], int] = Field(default_factory=lambda : cmisc.identity)
+  map: Callable[[int], int] = Field(default_factory=lambda: cmisc.identity)
+  controller2ctrl: Callable[[SceneControllerInput], np.ndarray]
+
 
 class SceneControllerInput(cmisc.PatchedModel):
-  inputs: dict = Field(default_factory=lambda: cmisc.defaultdict(float))
+  inputs: dict[int, float] = Field(default_factory=lambda: cmisc.defaultdict(float))
   parameters: InputControllerParameters = Field(default_factory=InputControllerParameters)
   speed: float = 1
   scale: float = 1
@@ -113,7 +125,24 @@ class SceneControllerInput(cmisc.PatchedModel):
   reset: bool = False
   precision: int = 1
   fix_mom: bool = True
+  mod1: bool = False
+  mod2: bool = False
+  mod3: bool = False
 
+  @property
+  def scaled_ctrl(self) -> dict[int, float]:
+    return {k: v * self.scale for k, v in self.inputs.items()}
+
+  @property
+  def scaled_ctrl_packed(self) -> np.ndarray:
+    ctrl = np.zeros(max(self.inputs.keys()))
+    for k, v in self.scaled_ctrl.items():
+      ctrl[k] = v
+    return ctrl
+
+  def get_ctrl(self) -> np.ndarray:
+    if self.parameters.controller2ctrl: return self.parameters.controller2ctrl(self)
+    return self.scaled_ctrl_packed
 
   def set(self, x, v):
     v = cmisc.sign(v) * linearize_clamp(abs(v), 0.1, 1, 0, 1)
@@ -122,6 +151,8 @@ class SceneControllerInput(cmisc.PatchedModel):
   def update_speed(self, ns: float):
     self.speed = max(ns, 0)
 
+
+InputControllerParameters.update_forward_refs()
 
 def jupyter_print(x):
   from IPython.display import clear_output

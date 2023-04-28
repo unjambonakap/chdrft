@@ -12,6 +12,7 @@ import numpy as np
 from chdrft.utils.types import *
 from pydantic import BaseModel, Field
 from typing import Tuple
+
 import xarray as xr
 from typing import Callable, List
 from scipy.spatial.transform import Rotation as R
@@ -50,7 +51,55 @@ def args(parser):
   ActionHandler.Prepare(parser, clist.lst, global_action=1)
 
 
-def box_scene() -> SceneContext:
+@SceneRegistar.reg_attr()
+def trivial_scene() -> SceneData:
+  sctx = SceneContext()
+  tx = RBTree(sctx=sctx)
+  root = tx.add(
+      RBDescEntry(
+          data=RBData(base_name='root'),
+          spec=SolidSpec.Box(2, 1, 1, 1),
+          link_data=LinkData(spec=LinkSpec(type=RigidBodyLinkType.FREE)),
+      )
+  )
+
+  res = tx.create(root)
+  fm = ForceModel.Id()
+  return SceneData(sctx=sctx, fm=fm, tree=tx)
+
+
+@SceneRegistar.reg_attr()
+def balance_scene() -> SceneData:
+  sctx = SceneContext()
+  tx = RBTree(sctx=sctx)
+  scale = 1e-3
+  root = tx.add(
+      RBDescEntry(
+          data=RBData(base_name='root'),
+          spec=SolidSpec.Cylinder(10, 1, 10),
+          link_data=LinkData(spec=LinkSpec(type=RigidBodyLinkType.FREE)),
+      )
+  )
+  box = tx.add(
+      RBDescEntry(
+          data=RBData(),
+          spec=SolidSpec.Box(1, 1, 1, 1),
+          link_data=LinkData(
+              spec=LinkSpec(
+                  type=RigidBodyLinkType.RIGID,
+                  wr=Transform.From(pos=[0, 0, -8]),
+              )
+          ),
+          parent=root,
+      )
+  )
+
+  res = tx.create(root)
+  fm = ForceModel.Id()
+  return SceneData(sctx=sctx, fm=fm, tree=tx)
+
+
+def box_scene() -> SceneData:
   sctx = SceneContext()
   tx = RBTree(sctx=sctx)
   root = tx.add(
@@ -63,7 +112,7 @@ def box_scene() -> SceneContext:
 
   res = tx.create(root)
   fm = ForceModel.Id()
-  return SceneData(sctx=sctx, fm=fm)
+  return SceneData(sctx=sctx, fm=fm, tree=tx)
 
 
 def define_wheel(tx, wheel_r, wheel_h, parent=None, **kwargs):
@@ -223,7 +272,7 @@ def scene_gyro_wheel():
 def scene_T():
 
   sctx = SceneContext()
-  tx = RBTree(sctx=sctx)
+  tx = RBTree(sctx=sctx, split_rigid=0)
   root = tx.add(
       RBDescEntry(
           data=RBData(base_name='root'),
@@ -233,7 +282,7 @@ def scene_T():
   b1 = tx.add(
       RBDescEntry(
           data=RBData(base_name='|'),
-          spec=SolidSpec.Box(9, 1, 1, 5),
+          spec=SolidSpec.Box(7, 1, 1, 7),
           link_data=LinkData(
               spec=LinkSpec(
                   type=RigidBodyLinkType.RIGID,
@@ -246,11 +295,11 @@ def scene_T():
   b2 = tx.add(
       RBDescEntry(
           data=RBData(base_name='----'),
-          spec=SolidSpec.Box(5, 3, 1, 1),
+          spec=SolidSpec.Box(3, 5, 1, 1),
           link_data=LinkData(
               spec=LinkSpec(
                   type=RigidBodyLinkType.RIGID,
-                  wr=Transform.From(pos=[2, 0, 0]),
+                  wr=Transform.From(pos=[3, 0, 0]),
               )
           ),
           parent=root,
@@ -328,7 +377,7 @@ def two_mass():
   res = tx.create(root)
 
   def ctrl2model(sim: Simulator, ctrl):
-    return (sim.rootl.rw @ SpatialVector.Force(ctrl).around(sim.rootl.wl @ -sim.rootl.agg_com)).data
+    return (sim.rootl.rw @ SpatialVector.Force(ctrl).around(-sim.rootl.agg_com)).data
 
     # would only be valid if split_rigid=False
     res = sim.rootl.rl @ sim.rootl.lw.tsf_rot @ SpatialVector.Force(ctrl)

@@ -206,6 +206,7 @@ class Range1D:
         return v
       return int(round(v))
     else:
+      # ?????
       if not self.is_int:
         return v
       return float(v)
@@ -213,12 +214,12 @@ class Range1D:
   def clampv(self, v):
     v = self.importv(v)
     if self.low is not None:
-      v = max(v, self.low)
+      v = np.maximum(v, self.low)
     if self.high is not None:
       if self.is_int:
-        v = min(v, self.high - 1)
+        v = np.minimum(v, self.high - 1)
       else:
-        v = min(v, self.high)
+        v = np.minimum(v, self.high)
     return v
 
   def linspace(self, stride=None, npoints=None):

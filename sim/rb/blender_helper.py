@@ -22,7 +22,7 @@ from enum import Enum
 import functools
 import chdrft.utils.Z as Z
 
-from chdrft.sim.blender import BlenderPhysHelper, ObjectSync
+from chdrft.sim.blender import BlenderPhysHelper, ObjectSync, BlenderObjWrapper
 from chdrft.display.blender import clear_scene, AnimationSceneHelper, KeyframeObjData
 from chdrft.sim.base import compute_cam_parameters
 from chdrft.sim.rb.rb_gen import *
@@ -50,14 +50,17 @@ class BlenderRBHelper:
     self.running_sim = False
     self.timer_freq = 60 * 2
     self.setup_timer()
+    self.cbs = []
 
   @cmisc.logged_failsafe
   def do_update(self):
+    for x in self.cbs:
+      x()
     if self.running_sim:
       self.ctrl.update()
       self.helper.update()
       mom = self.root.compute_momentum(Transform.From(), SpatialVector.Vector())
-      print(self.ctrl.sh.t, 'mom >>> ', mom.around(self.root.agg_com), self.root.agg_com)
+      #print(self.ctrl.sh.t, 'mom >>> ', mom.around(self.root.agg_com), self.root.agg_com)
 
   def setup_timer(self):
 
@@ -75,6 +78,8 @@ class BlenderRBHelper:
       use_gamepad=0,
       use_jit=0,
       cparams: ControlParameters = None,
+      input_params: InputControllerParameters = None,
+      debug_gamepad: bool = False,
   ):
     self.running_sim = False
     clear_scene()
@@ -93,12 +98,17 @@ class BlenderRBHelper:
 
     fspec = ControlFullSpec(consts=ControlInput(state=i0), spec=cspec)
 
+    input_params = input_params or InputControllerParameters(
+        map=lambda x: x,
+        controller2ctrl=lambda controller: controller.scaled_ctrl_packed[:fspec.spec.ctrl_packer.pos
+                                                                        ],
+    )
     ctrl = SceneController(
         fspec=fspec,
         dt_base=cparams.dt,
         use_jit=cparams.use_jit,
         use_gamepad=use_gamepad,
-        parameters=InputControllerParameters(map=lambda x: x),
+        parameters=input_params,
     )
 
     ctrl.setup()
@@ -116,10 +126,11 @@ class BlenderRBHelper:
         cam_loc, aabb.center, Vec3.Z().vdata, aabb.points[:, :3], blender=True
     )
     helper.cam.data.angle_y = cam_params.angle_box.yn
-    helper.cam.mat_world = cam_params.toworld
+    helper.cam.mat_world = cam_params.toworld.data
 
     #osync = ObjectSync(helper.obj2blender[rbl.child], helper.cam)
-    ctrl.debug(True, True)
+    if debug_gamepad:
+      ctrl.debug(True, True)
 
     self.sim = ctrl.sim
     self.helper = helper
@@ -130,9 +141,7 @@ class BlenderRBHelper:
     self.sim.load_state(i0)
     self.sh = ctrl.sh
 
-
-
-  def run_sim(self, override_ctrl: np.ndarray|Callable = None):
+  def run_sim(self, override_ctrl: np.ndarray | Callable = None):
     self.running_sim = True
     self.ctrl.set_override(override_ctrl)
     self.do_update()
@@ -153,3 +162,41 @@ class BlenderRBHelper:
 
 
 g_bh = BlenderRBHelper()
+
+
+class ReplayHelper(cmisc.PatchedModel):
+  ss: SceneSaver
+  shift: bool = False
+  follow_cam: bool = False
+  helper: BlenderPhysHelper
+  shift_p: Vec3 = Vec3.Zero()
+  cb: object = None
+  bobj: BlenderObjWrapper = None
+
+  def make(self):
+    sctx = self.ss.sd.sctx
+    rl = sctx.roots[0].self_link
+    self.helper.load(rl.rb)
+    cam = self.helper.cam
+    self.bobj = self.helper.obj2blender[rl.rb]
+
+    animation = AnimationSceneHelper(frame_step=1)
+    animation.start()
+
+    t = 0
+    for i, ex in enumerate(self.ss.states):
+      for name, state in ex.root2data.items():
+        obj = sctx.name2obj[name]
+        sctx.sys_spec.load_state(obj.self_link, state)
+
+      if i == 0:
+        if self.shift and self.helper.shift_p is None: self.helper.shift_p = -rl.wl.pos_v
+
+      if self.follow_cam:
+        aabb_l = rl.rb.aabb()
+        self.helper.set_cam_focus(rl.aabb().points, dv_abs = rl.wl @ (Vec3.X() * -3 * aabb_l.v[0]))
+
+      self.helper.update(animation, pre_cam_cb=self.cb)
+
+
+    animation.finish()

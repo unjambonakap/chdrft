@@ -411,6 +411,7 @@ class WafPLLL(WafBasePkg):
 
 
 class WafPython(WafBasePkg):
+  name = 'WAF_PYTHON'
 
   def register(self, ctx):
     ctx.load('python')
@@ -418,11 +419,16 @@ class WafPython(WafBasePkg):
     ctx.check_python_headers()
 
 
-class WafCGAL(WafBasePkg):
-  name = 'WAF_CGAL'
+class WafPythonEmbed(WafPkg):
 
-  def register(self, ctx):
-    ctx.check_cxx(lib='CGAL', uselib_store=self.name)
+  def __init__(self):
+    super().__init__('python3-embed')
+
+class WafCGAL(WafPkg):
+
+  def __init__(self):
+    super().__init__('cgal')
+
 
 
 class WafSwig(WafBasePkg):
@@ -444,11 +450,6 @@ class WafProtoc(WafBasePkg):
     ctx.env.PROTOC_ST = '-I%s'
 
 
-class WafAbsl(WafPkg):
-
-  def __init__(self):
-    super().__init__('absl_any')
-
 
 class WafPkgList:
 
@@ -460,6 +461,11 @@ class WafPkgList:
   def register(self, ctx):
     for x in self.tb:
       x.register(ctx)
+
+class WafAbsl(WafPkgList):
+
+  def __init__(self):
+    super().__init__('absl_any', 'absl_hash')
 
 
 class WafGRC(WafPkgList):
@@ -480,14 +486,20 @@ class WafDwf(WafPkg):
   def __init__(self):
     super().__init__('dwf')
 
+class WafGZ(WafPkgList):
+
+  def __init__(self):
+    super().__init__('gz-physics6', 'gz-common5', 'gz-math7', 'gz-transport12', 'gz-msgs9', 'gz-plugin2', 'gz-sim7', 'gz-gui7')
+
+
 
 class WafPackages:
+  GZ = WafGZ()
   OpenSSL = WafOpenSSL()
   OpenCV = WafOpenCV()
   ZeroMQ = WafZeroMQ()
   GMP = WafGMP()
   MPFR = WafMPFR()
-  Python = WafPython()
   Swig = WafSwig()
   PThread = WafPThread()
   Protobuf = WafProtobuf()
@@ -512,6 +524,8 @@ class WafPackages:
   Uhd = WafUhd()
   YamlCPP = WafYamlCPP()
   Lemon = WafLemon()
+  Python = WafPython()
+  PythonEmbed = WafPythonEmbed()
   CGAL = WafCGAL()
   Qgis = WafQgis()
   #dwf = WafDwf()
@@ -665,7 +679,7 @@ class ClOpaWaf:
           '-fabi-version=2',
           '-fomit-frame-pointer',
           '-fno-strict-aliasing',
-          '-std=c++11',
+          '-std=c++17',
           '-nostdinc++',
       ]
 
@@ -725,7 +739,7 @@ class ClOpaWaf:
     else:
       ctx.env.append_value('CFLAGS', ['-fPIC', '-Wreturn-type',])
       ctx.env.append_value('CXXFLAGS',
-                           ['-fPIC', '-std=c++14', '-Wreturn-type', '-Wno-stringop-overflow', '-Wno-unknown-warning-option', '-Wno-attributes',
+                           ['-fPIC', '-std=c++20', '-Wreturn-type', '-Wno-stringop-overflow', '-Wno-unknown-warning-option', '-Wno-attributes',
                              ])
 
       ctx.env.append_value('CFLAGS', ['-Wno-error'])
@@ -1025,6 +1039,7 @@ class ExtraConf:
           before, self.builder.ctx.path.abspath(), self.sources, self.features)
 
     tmp = tb._elem
+    print('GOGO ', tmp)
     x = self.builder.ctx(**tmp)
     x.opa_data = self
 
@@ -1074,7 +1089,6 @@ class TgenGetter:
       for g in self.ctx.groups:
         for tg in g:
           try:
-            print(tg.name)
             cache[tg.name] = tg
             self.add_name(tg.name)
           except AttributeError:
@@ -1087,6 +1101,7 @@ class TgenGetter:
     self.rebuild()
     ans = self.matcher.find(name)
     if ans == None:
+      print('TRY It ', self.ctx_cache())
       raise Errors.WafError('Could not find a task generator for the name %r (debug=%s)' %
                             (name, self.matcher.debug))
     return self.ctx_cache()[ans[1]]

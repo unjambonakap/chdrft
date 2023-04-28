@@ -593,7 +593,7 @@ def numpy2tex(data):
 
 
 def numpy_to_vtk_image(data):
-  data= cv2.cvtColor(data, cv2.COLOR_BGR2RGB)
+  #data= cv2.cvtColor(data, cv2.COLOR_BGR2RGB)
 
   data = np.ascontiguousarray(data.reshape((1,) + data.shape))
   res = vtkImageImportFromArray.vtkImageImportFromArray()

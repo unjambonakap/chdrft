@@ -1,5 +1,6 @@
 #!/usr/bin/env python
 
+from __future__ import annotations
 from bpy_extras.image_utils import load_image
 from bpy_extras.node_shader_utils import PrincipledBSDFWrapper
 from chdrft.cmds import CmdsList
@@ -9,6 +10,7 @@ from chdrft.main import app
 from chdrft.utils.cmdify import ActionHandler
 from chdrft.utils.misc import Attributize as A
 from chdrft.utils.types import *
+from chdrft.sim.rb.base import Vec3, Transform, AABB
 from scipy.spatial.transform import Rotation as R
 import bpy
 import chdrft.utils.misc as cmisc
@@ -62,6 +64,7 @@ def clear_collection(col):
 class BlenderTriangleActor(TriangleActorBase):
 
   def __init__(self, name="object"):
+    super().__init__()
     self._name = name
 
   def _norm_tex(self, tex):
@@ -75,13 +78,17 @@ class BlenderTriangleActor(TriangleActorBase):
     edges = []
     faces = []
     new_mesh = bpy.data.meshes.new(f'{self._name}_mesh')
-    new_mesh.from_pydata(list(self.points), edges, list(self.trs))
+    pts = np.array(self.points)
+    center = np.mean(pts, axis=0)
+    pts -= center
+    new_mesh.from_pydata(pts, edges, list(self.trs))
     new_mesh.update()
     # make object from mesh
     new_object = bpy.data.objects.new(self._name, new_mesh)
-    # make collection
+    new_object.location = center
 
-    if self.tex_coords:
+    # make collection
+    if len(self.tex_coords):
       new_object.data.uv_layers.new(name='uv_map')
       for fid, face in enumerate(new_object.data.polygons):
         for vert_idx, loop_idx in zip(face.vertices, face.loop_indices):
@@ -94,6 +101,7 @@ def create_material_for_obj(obj, img, name):
     tex = bpy.data.images.load(img)
   else:
     with tempfile.NamedTemporaryFile(suffix='.png') as f:
+      img = cv2.cvtColor(img, cv2.COLOR_RGB2BGR)
       cv2.imwrite(f.name, img)
       f.flush()
       tex = bpy.data.images.load(f.name)
@@ -106,7 +114,7 @@ def create_material_for_obj(obj, img, name):
   obj.active_material = mat
 
 
-def make_group(prefix, collection, items):
+def make_group(prefix, collection, items) -> bpy.types.Object:
   main = bpy.data.objects.new(prefix, None)
   main_col = bpy.data.collections.new(f'{prefix}_col')
   collection.children.link(main_col)
@@ -208,6 +216,14 @@ class BlenderObjWrapper:
   def mat_world(self):
     return np.array(self.internal.matrix_world)
 
+  @property
+  def wl(self) -> Transform:
+    return Transform(self.mat_world)
+
+  @wl.setter
+  def wl(self, v: Transform):
+    self.mat_word = v.data
+
   @mat_world.setter
   def mat_world(self, val):
     self.internal.matrix_world = val.T
@@ -221,6 +237,15 @@ class BlenderObjWrapper:
   def mat_local(self, val):
     if self.internal.parent: self.internal.matrix_local = val.T
     else: self.mat_world = val
+
+  @property
+  def children(self) -> list[BlenderObjWrapper]:
+    return [BlenderObjWrapper(x) for x in self.internal.children]
+
+  @property
+  def aabb_w(self) -> AABB:
+    start = AABB.FromPoints(np.array(self.internal.bound_box))
+    return self.wl @ cmisc.functools.reduce(AABB.__or__, [x.aabb_w for x in self.children], start)
 
 
 class KeyframeObjData(cmisc.PatchedModel):

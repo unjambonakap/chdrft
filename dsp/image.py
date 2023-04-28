@@ -1,6 +1,5 @@
 #!/usr/bin/env python
 
-
 from IPython.utils.frame import extract_module_locals
 from asq.initiators import query as asq_query
 from enum import Enum
@@ -68,10 +67,11 @@ def args(parser):
 
 
 def warp_affine_xy(img, mat, dim):
-  nmat = np.array(mat[:2,:3])
+  nmat = np.array(mat[:2, :3])
   #nmat[0,2] = mat[1,2]
   #nmat[1,2] = mat[0,2]
   return cv2.warpAffine(np.array(img), nmat, tuple(dim), flags=cv2.WARP_INVERSE_MAP)
+
 
 def genbox_subimg(img, gb):
   mat = gb.normed.mat2world
@@ -89,12 +89,9 @@ def shift_image(im, offset):
   return im
 
 
-
-
 def downscale_img(img, downscale):
   target_scale = np.rint(np.array(img.shape[:2]) / downscale).astype(int)
   return cv2.resize(img, tuple(target_scale[::-1]))
-
 
 
 def plot_img(img):
@@ -110,6 +107,7 @@ def norm_img(img):
     img = img / 255.
   return img
 
+
 def to_uint8_image(res):
   if res.dtype == np.float64:
     res = (res * 255).astype(np.uint8)
@@ -118,6 +116,7 @@ def to_uint8_image(res):
 
 def save_image(fname, res):
   cv2.imwrite(fname, to_uint8_image(res))
+
 
 def read_tiff(fname):
   res = cv2.imread(fname, 0)
@@ -142,7 +141,6 @@ class ImageData(cmisc.Attr):
     b = (box * u2px).to_int_round().make_zero_image(dtype=np.float, yx=yx)
     return ImageData(b, box=box, yx=yx, **kwargs)
 
-
   def __init__(
       self,
       img=None,
@@ -154,8 +152,8 @@ class ImageData(cmisc.Attr):
       nobuild=0,
       zpos=None,
       store_on_disk=0,
-    yx=1,
-    stuff=None,
+      yx=1,
+      stuff=None,
       **kwargs,
   ):
     super().__init__()
@@ -269,6 +267,7 @@ class ImageData(cmisc.Attr):
   def plot(self, **kwargs):
     from chdrft.display.service import g_plot_service
     return g_plot_service.plot(cmisc.Attr(images=[self], **kwargs))
+
 
 def test(ctx):
   pass

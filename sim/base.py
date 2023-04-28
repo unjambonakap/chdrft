@@ -1,5 +1,6 @@
 #!/usr/bin/env python
 
+from __future__ import annotations
 from chdrft.cmds import CmdsList
 from chdrft.main import app
 from chdrft.utils.cmdify import ActionHandler
@@ -25,6 +26,8 @@ from moviepy.editor import VideoClip, ImageClip, concatenate_videoclips
 import chdrft.utils.Z as Z
 import spiceypy
 from chdrft.dsp.image import ImageData
+from chdrft.sim.rb.base import Transform
+from astropy import constants as const
 
 global flags, cache
 flags = None
@@ -51,85 +54,17 @@ def args(parser):
 
 
 class Consts:
-  EARTH_ELLIPSOID = pymap3d.Ellipsoid('wgs84')
-  MOON_ELLIPSOID = pymap3d.Ellipsoid('moon')
-
-
-class TMSQuad:
-  LMAX = 85.05113
-  MAX_DEPTH = 20
-
-  def __init__(self, x, y, z):
-    self.x = x
-    self.y = y
-    self.z = z
-    self._children = None
-
-  @property
-  def children(self):
-    if self._children is None:
-      self._children = []
-      if self.z + 1 < TMSQuad.MAX_DEPTH:
-        for i in range(4):
-          self._children.append(TMSQuad(2 * self.x + (i & 1), 2 * self.y + (i >> 1), self.z + 1))
-    return self._children
-
-  def __iter__(self):
-    return iter(self.children)
-
-  @property
-  def box_latlng(self):
-    bounds = mercantile.bounds(*self.xyz)
-    box = Box(low=(bounds.west, bounds.south), high=(bounds.east, bounds.north))
-    return box
-
-  @property
-  def quad_ecef(self):
-    p = self.box_latlng.poly()
-    return opa_struct.Quad(
-        np.stack(pymap3d.geodetic2ecef(p[:, 1], p[:, 0], 0, ell=Consts.EARTH_ELLIPSOID), axis=-1) /
-        1e3
-    )
-
-  @property
-  def xyz(self):
-    return self.x, self.y, self.z
-
-  def tile(self, tg):
-    return tg.get_tile(*self.xyz)
-
-  @staticmethod
-  def Root():
-    return TMSQuad(0, 0, 0)
-
+  EARTH_ELLIPSOID = pymap3d.Ellipsoid.from_name('wgs84')
+  MOON_ELLIPSOID = pymap3d.Ellipsoid.from_name('moon')
+  EARTH_ROUND_ASTROPY = pymap3d.Ellipsoid(
+      semimajor_axis=const.R_earth.value, semiminor_axis=const.R_earth.value
+  )
 
 def do_visit(obj, func):
   if func(obj):
     for x in obj:
       do_visit(x, func)
 
-
-class Quad:
-
-  def __init__(self, box, depth):
-    self.box = box
-    self.depth = depth
-    self._children = None
-
-  @property
-  def children(self):
-    if self._children is None:
-      self._children = []
-      for qd in self.box.quadrants:
-        self._children.append(Quad(qd, self.depth + 1))
-    return self._children
-
-  def __iter__(self):
-    return iter(self.children)
-
-  @staticmethod
-  def Root():
-    return Quad(g_unit_box, 0)
 
 
 def create_moon_data():
@@ -166,7 +101,9 @@ def compute_angles(center, focal_point, up, pts):
   return res, y
 
 
-def compute_cam_parameters(center, focal_point, up, pts, expand=0.05, aspect=None, nearfar=(1,1e20), blender=False):
+def compute_cam_parameters(
+    center, focal_point, up, pts, expand=0.05, aspect=None, nearfar=(1, 1e20), blender=False
+):
   z = make_norm(focal_point - center)
   up = make_orth_norm(up, z)
 
@@ -177,10 +114,10 @@ def compute_cam_parameters(center, focal_point, up, pts, expand=0.05, aspect=Non
   if aspect is not None:
     angle_box = angle_box.set_aspect(aspect)
 
-  z = focal_point-center
+  z = focal_point - center
   if blender: z = -z
-  rot = rot_look_at(z ,y)
-  toworld = MatHelper.simple_mat(offset=center, rot=rot)
+  rot = rot_look_at(z, y)
+  toworld = Transform.From(pos=center, rot=rot)
   persp = None
   if aspect:
     persp = perspective(angle_box.yn, aspect, *nearfar)
@@ -348,13 +285,34 @@ class Actor:
     return np.array(self.actor.GetPosition())
 
   def get_pts_world(self):
-    return MatHelper.mat_apply_nd(opa_vtk.vtk_matrix_to_numpy(self.actor.GetMatrix()), np.array(self.pts).T, point=True, n=3).T
+    return MatHelper.mat_apply_nd(
+        opa_vtk.vtk_matrix_to_numpy(self.actor.GetMatrix()), np.array(self.pts).T, point=True, n=3
+    ).T
 
   def setup_internal(self):
     return
 
   def is_normal_actor(self):
     return self.typ not in (ActorType.Light, ActorType.Cam)
+
+
+def create_earth_actors(
+    actor_class,
+    max_depth: int,
+    tile_depth: int,
+    params: TMSQuadParams,
+    ll_box: Box = None
+) -> SimpleVisitor:
+  tg = TileGetter()
+  u = SimpleVisitor(
+      tg,
+      actor_class,
+      max_depth=max_depth,
+      tile_depth=tile_depth,
+      ll_box=ll_box,
+  )
+  do_visit(TMSQuad.Root(params), u)
+  return u
 
 
 class EarthActor(Actor):
@@ -364,12 +322,10 @@ class EarthActor(Actor):
 
   def setup_internal(self):
     from chdrft.display.vtk import TriangleActorVTK
-    tg = TileGetter()
-    u = SimpleVisitor( tg,TriangleActorVTK,  2)
-    do_visit(TMSQuad.Root(1e-3), u)
+    u = create_earth_actors(TriangleActorVTK, 2, 2, m2u=TMSQuadParams(m2u=1e-3))
     earth_assembly = opa_vtk.vtk.vtkAssembly()
     for x in u.actors:
-      actor =x.obj
+      actor = x.obj
 
       earth_assembly.AddPart(actor)
       actor.GetProperty().SetAmbient(0)
@@ -403,10 +359,10 @@ class CamActor(Actor):
 
   def set_pos_and_rot(self, pos, rot):
     a = opa_vtk.vtk.vtkMatrixToHomogeneousTransform()
-    a.SetInput(build_user_matrix(pos,rot))
+    a.SetInput(build_user_matrix(pos, rot))
     self.actor.SetUserTransform(a)
 
-  def run(self,*args, **kwargs):
+  def run(self, *args, **kwargs):
     super().run(*args, **kwargs)
 
   @property
@@ -447,21 +403,31 @@ class CamActor(Actor):
 
 class Renderer:
 
-  def __init__(self, width=None, height=None, offscreen=False, actors=None, dataf=lambda t: None, state_cb=None):
+  def __init__(
+      self,
+      width=None,
+      height=None,
+      offscreen=False,
+      actors=None,
+      dataf=lambda t: None,
+      state_cb=None
+  ):
     kwargs = dict(width=width, height=height)
     if offscreen:
       main = opa_vtk.vtk_offscreen_obj(**kwargs)
     else:
       main = opa_vtk.vtk_main_obj(**kwargs)
     if state_cb is None:
-      state_cb = lambda data, tdesc: A(label=str(datetime.datetime.utcfromtimestamp(tdesc.t)), want=True, overlay=[])
+      state_cb = lambda data, tdesc: A(
+          label=str(datetime.datetime.utcfromtimestamp(tdesc.t)), want=True, overlay=[]
+      )
     self.state_cb = state_cb
 
     self.main = main
     self.normal_actors = [x for x in actors if x.is_normal_actor()]
     self.cam = cmisc.asq_query([x for x in actors if x.typ == ActorType.Cam]).single()
     self.lights = cmisc.asq_query([x for x in actors if x.typ == ActorType.Light]).to_list()
-    self.actors =  self.normal_actors + self.lights + [self.cam]
+    self.actors = self.normal_actors + self.lights + [self.cam]
     self.dataf = dataf
     self.prepare()
 
@@ -482,11 +448,12 @@ class Renderer:
   def configure_at(self, t):
     data = self.dataf(t)
     self.cur_data = data
-    for x in self.actors: x.run(t, data=data)
+    for x in self.actors:
+      x.run(t, data=data)
 
   def process(self, tl, no_render=None, outfile=None):
     imgs = []
-    need_imgs  = outfile or not no_render
+    need_imgs = outfile or not no_render
     from chdrft.display.render import ImageGrid
     for i, t in enumerate(tl):
       self.configure_at(t)
@@ -508,13 +475,14 @@ class Renderer:
           meshes.append(ov)
         mo.misc.append(A(text=e.stuff.label, pos=e.pos, zpos=-10))
 
-
       import chdrft.utils.K as K
       K.vispy_utils.render_for_meshes(meshes)
 
     if outfile:
       fps = 10
-      video = concatenate_videoclips(list([ImageClip(x[::-1]).set_duration(1 / fps) for x.img in imgs]))
+      video = concatenate_videoclips(
+          list([ImageClip(x[::-1]).set_duration(1 / fps) for x.img in imgs])
+      )
       print(video.duration)
       video.write_videofile(outfile, fps=fps)
 
@@ -528,24 +496,13 @@ def test(ctx):
   print(tmp.to_dataframe().iloc[-1])
 
 
-def main():
-  ctx = Attributize()
-  ActionHandler.Run(ctx)
-
-
-app()
-
-class Consts:
-  EARTH_ELLIPSOID = pymap3d.Ellipsoid('wgs84')
-  MOON_ELLIPSOID = pymap3d.Ellipsoid('moon')
-
 class Quad:
 
   def __init__(self, box, depth, parent=None):
     self.box = box
     self.depth = depth
     self._children = None
-    self.parent= parent
+    self.parent = parent
 
   @property
   def children(self):
@@ -563,18 +520,24 @@ class Quad:
     return Quad(g_unit_box, 0)
 
 
+class TMSQuadParams(cmisc.PatchedModel):
+  m2u: float
+  ell: pymap3d.Ellipsoid = Consts.EARTH_ELLIPSOID
+
+
 class TMSQuad:
   LMAX = 85.05113
   MAX_DEPTH = 20
 
-  def __init__(self, x, y, z, u2s, parent=None):
+  def __init__(self, x, y, z, params: TMSQuadParams, parent=None):
     self.x = x
     self.y = y
     self.z = z
-    self.u2s=u2s
+    self.params = params
     self._children = None
     self.parent = parent
     self.depth = z
+    self.data = None
 
   @property
   def children(self):
@@ -582,7 +545,11 @@ class TMSQuad:
       self._children = []
       if self.z + 1 < TMSQuad.MAX_DEPTH:
         for i in range(4):
-          self._children.append(TMSQuad(2 * self.x + (i & 1), 2 * self.y + (i >> 1), self.z + 1, self.u2s, parent=self))
+          self._children.append(
+              TMSQuad(
+                  2 * self.x + (i & 1), 2 * self.y + (i >> 1), self.z + 1, self.params, parent=self
+              )
+          )
     return self._children
 
   def __iter__(self):
@@ -595,23 +562,33 @@ class TMSQuad:
     return box
 
   @property
+  def box_latlng_rad(self):
+    return Z.deg2rad(self.box_latlng)
+
+  @property
   def quad_ecef(self):
     p = self.box_latlng.poly()
     return opa_struct.Quad(
-        np.stack(pymap3d.geodetic2ecef(p[:, 1], p[:, 0], 0, ell=Consts.EARTH_ELLIPSOID), axis=-1) * self.u2s
+        np.stack(pymap3d.geodetic2ecef(p[:, 1], p[:, 0], 0, ell=self.params.ell), axis=-1) *
+        self.params.m2u
     )
 
   @property
   def xyz(self):
     return self.x, self.y, self.z
 
-  def tile(self, tg):
-    return tg.get_tile(*self.xyz)
+  def tile(self, tg) -> np.ndarray:
+    if self.data is None:
+      self.data = tg.get_tile(*self.xyz)
+    return self.data
 
   @staticmethod
-  def Root(u2s):
-    return TMSQuad(0, 0, 0, u2s)
-  def __str__(self): return f'xyz={self.xyz}'
+  def Root(params: TMSQuadParams):
+    return TMSQuad(0, 0, 0, params)
+
+  def __str__(self):
+    return f'xyz={self.xyz}'
+
 
 class CylindricalVisitor:
 
@@ -641,29 +618,41 @@ class CylindricalVisitor:
 
 class SimpleVisitor:
 
-  def __init__(self, tg, actor_builder=None, max_depth=2, tile_depth=None):
+  def __init__(
+      self, tg: TileGetter, actor_builder=None, max_depth=2, tile_depth=None, ll_box: Box = None
+  ):
     self.max_depth = max_depth
-    if tile_depth is None: tile_depth= max_depth
+    if tile_depth is None: tile_depth = max_depth
     self.tile_depth = tile_depth
     self.actors = []
+    self.items = []
+    self.ll_box = ll_box or Box(xr=[-np.pi, np.pi], yr=[-np.pi / 2, np.pi / 2])
     self.actor_builder = actor_builder
     self.points = []
     self.tg = tg
 
-  def __call__(self, obj):
+  def __call__(self, obj: TMSQuad):
+    if not self.ll_box.intersects(obj.box_latlng_rad): return 0
     if obj.z < self.max_depth: return 1
+
     ttile = obj
     while ttile.depth > self.tile_depth:
-        ttile = ttile.parent
+      ttile = ttile.parent
     tx = ttile.tile(self.tg)
 
     actor = self.actor_builder()
     actor.name = str(obj)
-    actor.full_quad(obj.quad_ecef, uv=ttile.box_latlng.to_box_space(obj.box_latlng).quad.pts).build(tx)
+    actor.full_quad(obj.quad_ecef,
+                    uv=ttile.box_latlng.to_box_space(obj.box_latlng).quad.pts).build(tx)
     self.actors.append(actor)
     self.points.extend(obj.quad_ecef.pts)
+    self.items.append(ttile)
     return 0
 
 
+def main():
+  ctx = Attributize()
+  ActionHandler.Run(ctx)
 
 
+app()

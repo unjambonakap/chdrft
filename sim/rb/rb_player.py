@@ -29,7 +29,7 @@ from chdrft.utils.fmt import Format
 from chdrft.utils.path import FileFormatHelper
 from typing import Callable
 from chdrft.sim.rb.rb_gen import *
-from chdrft.inputs.controller import OGamepad, SceneControllerInput, InputControllerParameters
+from chdrft.inputs.controller import OGamepad, SceneControllerInput, InputControllerParameters, GamepadButtons
 from chdrft.utils.rx_helpers import ImageIO, rx, pipe_connect
 from pydantic import Field
 from chdrft.display.ui import TimerHelper
@@ -38,6 +38,12 @@ global flags, cache
 flags = None
 cache = None
 
+class ButtonKind(int, Enum):
+  LTRT = 0
+  LEFT_X = 1
+  LEFT_Y = 2
+  RIGHT_X = 3
+  RIGHT_Y = 4
 
 def args(parser):
   clist = CmdsList()
@@ -54,20 +60,27 @@ def gamepad2scenectrl_io(state: SceneControllerInput = None) -> ImageIO:
     return v
 
   mp = {
-      ('LT', 'RT'): lambda s, v: s.set(0, mixaxis(*v)),
-      'LEFT-X': lambda s, v: s.set(1, v),
-      'RIGHT-X': lambda s, v: s.set(2, v),
+      ('LT', 'RT'): lambda s, v: s.set(ButtonKind.LTRT, mixaxis(*v)),
+      'LEFT-X': lambda s, v: s.set(ButtonKind.LEFT_X, v),
+      'LEFT-Y': lambda s, v: s.set(ButtonKind.LEFT_Y, v),
+      'RIGHT-X': lambda s, v: s.set(ButtonKind.RIGHT_X, v),
+      'RIGHT-Y': lambda s, v: s.set(ButtonKind.RIGHT_Y, v),
       ('XBOX', True): lambda s: s.__setattr__('use_jit', not s.use_jit),
       'BACK': lambda s, v: s.__setattr__('reset', v),
       ('LB', True): lambda s: s.__setattr__('scale', max(s.scale - 1, 0)),
       ('RB', True): lambda s: s.__setattr__('scale', s.scale + 1),
       ('START', True): lambda s: s.__setattr__('stop', not s.stop),
-      ('X', True): lambda s: s.__setattr__('fix_mom', not s.fix_mom),
+      (GamepadButtons.X, True): lambda s: s.__setattr__('fix_mom', not s.fix_mom),
+      GamepadButtons.Y: lambda s, v: s.__setattr__('mod1', v),
+      GamepadButtons.A: lambda s, v: s.__setattr__('mod2', v),
+      GamepadButtons.B: lambda s, v: s.__setattr__('mod3', v),
       ('DPAD-LEFT', True): lambda s: s.update_speed(s.speed - 1),
       ('DPAD-RIGHT', True): lambda s: s.update_speed(s.speed + 1),
       ('DPAD-UP', True): lambda s: s.update_speed(s.speed * 1.2),
       ('DPAD-DOWN', True): lambda s: s.update_speed(s.speed / 1.2),
   }
+  for x in list(ButtonKind):
+    state.set(x, 0)
 
   def proc(tb):
     for k, cb in mp.items():
@@ -95,7 +108,7 @@ class SceneController(cmisc.PatchedModel):
   obs_scene: ImageIO = None
   use_jit: bool = False
   use_gamepad: bool = True
-  parameters: InputControllerParameters = Field(default_factory=InputControllerParameters)
+  parameters: InputControllerParameters = None
   s0: SceneControllerInput = None
   mom: SpatialVector = None
   override_ctrl: np.ndarray | Callable = None
@@ -143,12 +156,7 @@ class SceneController(cmisc.PatchedModel):
       return
     if input.stop: return
     if input.speed <= 0: return
-    ctrl = np.zeros(self.fspec.spec.ctrl_packer.pos)
-    for k, v in input.inputs.items():
-      if isinstance(k, int):
-        if k < len(ctrl): ctrl[k] = v
-
-    ctrl = ctrl * input.scale
+    ctrl = input.get_ctrl()
 
     for i in range(input.precision):
       if self.override_ctrl is not None:
@@ -157,9 +165,8 @@ class SceneController(cmisc.PatchedModel):
           self.dt_base * input.speed / input.precision,
           ctrl,
           use_jit=self.use_jit and input.use_jit,
-          rk4=1
       )
-    if not input.fix_mom:
+    if not input.fix_mom or self.mom is None:
       self.mom = self.sh.sim.mom
     else:
       self.sh.fix_mom(self.mom)

@@ -298,7 +298,7 @@ class MathUtils:
     self.pw = pw
 
     for i in range(1, n + 1):
-      self.fact[i] = self.fact[i - 1] * gmpy2.powmod(i, self.pw, self.mod)
+      self.fact[i] = self.fact[i - 1] * int(gmpy2.powmod(i, self.pw, self.mod))
       if mod is not None:
         self.fact[i] %= mod
 
@@ -306,7 +306,7 @@ class MathUtils:
       self.ifact = None
     else:
       for i in range(1, n + 1):
-        self.ifact[i] = gmpy2.invert(self.fact[i], mod)
+        self.ifact[i] = int(gmpy2.invert(self.fact[i], mod))
 
   def cnk(self, n, k):
     if n < k or k < 0: return 0

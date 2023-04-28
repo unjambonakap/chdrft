@@ -1,5 +1,6 @@
 #!/usr/bin/env python
 
+import typing
 from typing import Tuple, Optional
 from dataclasses import dataclass
 from chdrft.cmds import CmdsList
@@ -136,7 +137,10 @@ class FreeJoint(cmisc.PatchedModel):
 
   @classmethod
   def From(
-      cls, data: np.ndarray = None, tsf: Transform = None, data_pivot: np.ndarray = None
+      cls,
+      data: np.ndarray = None,
+      tsf: Transform = None,
+      data_pivot: np.ndarray = None
   ) -> "FreeJoint":
     if data_pivot is not None:
       return FreeJoint(p_w=Vec3.Zero(), aa=Vec3(data_pivot[:3]))
@@ -173,8 +177,16 @@ class JointSV(cmisc.PatchedModel):
   def type(self) -> RigidBodyLinkType:
     return self.spec.type
 
-  def load(self, q: np.ndarray) -> None:
+  def load(self, q: np.ndarray, scale: float=None) -> None:
     self.q = q
+    if scale is not None:
+      if self.type is RigidBodyLinkType.FREE:
+        self.q[:3] *= scale
+      elif self.type is RigidBodyLinkType.RIGID:
+        pass
+      else:
+        raise NotImplemented('nope')
+
 
   def dump(self) -> np.ndarray:
     return self.q
@@ -182,6 +194,10 @@ class JointSV(cmisc.PatchedModel):
   @property
   def v_free(self) -> SpatialVector:
     return SpatialVector.Vector(self.q)
+
+  @v_free.setter
+  def v_free(self, sv: SpatialVector):
+    self.q[:6] = sv.data
 
   @property
   def v_free_pivot(self) -> SpatialVector:
@@ -267,6 +283,10 @@ class JointSV(cmisc.PatchedModel):
   def free_joint(self) -> FreeJoint:
     return FreeJoint.From(self.q)
 
+  @free_joint.setter
+  def free_joint(self, v: FreeJoint) -> FreeJoint:
+    self.q = v.data
+
   @property
   def free_joint_pivot(self) -> FreeJoint:
     return FreeJoint.From(data_pivot=self.q)
@@ -328,8 +348,8 @@ class LinkData(cmisc.PatchedModel):
   def get_joint(self, v=0) -> JointSV:
     return self.qd_joint if v else self.q_joint
 
-  def load_joint(self, data: np.ndarray, v=0) -> None:
-    self.get_joint(v).load(data)
+  def load_joint(self, data: np.ndarray, v=0, scale: float=None) -> None:
+    self.get_joint(v).load(data, scale=scale)
 
   def dump_joint(self, v=0) -> np.ndarray:
     return self.get_joint(v).dump()
@@ -448,13 +468,7 @@ class RigidBodyLink(cmisc.PatchedModel):
     return self.rb.com
 
   def aabb(self, only_self=False) -> AABB:
-    pts = []
-    pts.extend(self.rb.spec.mesh.bounds.points)
-    if not only_self:
-      for x in self.rb.move_links:
-        pts.extend(x.aabb().points)
-
-    return AABB.FromPoints(self.wl.map(np.array(pts)))
+    return self.wl @ self.rb.aabb(only_self=only_self)
 
   def get_particles(self, n, **kwargs) -> Particles:
     return self.to_world_particles(self.rb.get_particles(n, **kwargs))
@@ -514,6 +528,15 @@ class RigidBody(cmisc.PatchedModel):
     if not self.self_link.parent: return None
     return self.self_link.parent.rb
 
+  def aabb(self, only_self=False) -> AABB:
+    pts = []
+    pts.extend(self.spec.mesh.bounds.points)
+    if not only_self:
+      for x in self.move_links:
+        pts.extend(x.aabb().points)
+
+    return AABB.FromPoints(np.array(pts))
+
   @property
   def name(self) -> str:
     if self.data.internal: return f'{self.base_name}_internal'
@@ -534,7 +557,7 @@ class RigidBody(cmisc.PatchedModel):
 
   @property
   def mass(self) -> float:
-    return self.spec.mass
+    return self.spec.inertial.mass
 
   @property
   def com(self) -> Vec3:
@@ -542,31 +565,28 @@ class RigidBody(cmisc.PatchedModel):
 
   @property
   def local_inertial_tensor(self) -> Transform_SV:
-    return Transform_SV.MakeSpatialTensor(
-        self.spec.mass,
-        self.spec.inertial_tensor.shift_inertial_tensor(-self.com.as_vec, self.mass)
-    )
+    return Transform_SV.MakeSpatialTensor(self.spec.inertial.shift(-self.com.as_vec))
 
   def get_self_particles(
       self, n, use_importance=False, particles_filter=lambda _: True
   ) -> Particles:
     if not particles_filter(self): return Particles.Default()
     if use_importance:
-      pts, w = self.spec.mesh.importance_sampling(n, self.spec.mass)
+      pts, w = self.spec.mesh.importance_sampling(n, self.mass)
       n = len(pts)
     else:
       pts = self.spec.mesh.rejection_sampling(n)
       n = len(pts)
-      w = np.ones((n,)) * (self.spec.mass / max(n, 1))
+      w = np.ones((n,)) * (self.mass / max(n, 1))
 
     return Particles(
         weights=w, p=pts, n=n, v=np.zeros((n, 4)), id_obj=np.ones((n,), dtype=int) * self.idx
     )
 
   def get_particles(self, n, **kwargs) -> Particles:
-    fmass = self.mass
-    tb = [self.get_self_particles(int(n * self.spec.mass / fmass), **kwargs)]
-    tb.extend([x.get_particles(int(n * x.mass / fmass), **kwargs) for x in self.move_links])
+    fmass = self.self_link.agg_mass
+    tb = [self.get_self_particles(int(n * self.mass / fmass), **kwargs)]
+    tb.extend([x.get_particles(int(n * x.agg_mass / fmass), **kwargs) for x in self.move_links])
     res = functools.reduce(Particles.reduce, tb)
     return res
 
@@ -574,7 +594,7 @@ class RigidBody(cmisc.PatchedModel):
   def cur_mesh(self) -> MeshDesc:
     return ComposedMeshDesc(
         meshes=[self.spec.mesh] + [x.cur_mesh for x in self.move_links],
-        weights=[self.spec.mass] + [x.mass for x in self.move_links]
+        weights=[self.mass] + [x.mass for x in self.move_links]
     )
 
   def plot(self, npoints=10000):
@@ -676,10 +696,10 @@ class RBSystemSpec(cmisc.PatchedModel):
   ctrl_packer: NumpyPacker = Field(default_factory=NumpyPacker)
   name2rbl: dict[str, RigidBodyLink]
 
-  def load_state(self, root: RigidBodyLink, dx: ControlInputState | np.ndarray = None) -> None:
+  def load_state(self, root: RigidBodyLink, dx: ControlInputState | np.ndarray = None, scale: float = None) -> None:
     if not isinstance(dx, (A, ControlInputState)): dx = self.state_packer.unpack(dx)
-    self.load_vp(root, dx.q, v=0)
-    self.load_vp(root, dx.qd, v=1)
+    self.load_vp(root, dx.q, v=0, scale=scale)
+    self.load_vp(root, dx.qd, v=1, scale=scale)
 
   def dump_state(self, root: RigidBodyLink, to_struct=False) -> np.ndarray | ControlInputState:
     dx = A(q=self.dump_vp(root, v=0), qd=self.dump_vp(root, v=1))
@@ -689,11 +709,11 @@ class RBSystemSpec(cmisc.PatchedModel):
   def get_qx_desc(self, v) -> SliceNumpyArrayDesc:
     return self.qd_desc if v else self.q_desc
 
-  def load_vp(self, root: RigidBodyLink, q: np.ndarray, v=0) -> None:
+  def load_vp(self, root: RigidBodyLink, q: np.ndarray, v=0, scale: float=None) -> None:
 
     mp = self.get_qx_desc(v).unpack(q)
     for rbl in root.descendants:
-      rbl.link_data.load_joint(mp[rbl.rb.name], v=v)
+      rbl.link_data.load_joint(mp[rbl.rb.name], v=v, scale=scale)
 
   def dump_vp(self, root: RigidBodyLink, v=0) -> None:
     d = self.get_qx_desc(v)
@@ -816,11 +836,6 @@ class ForceModel(cmisc.PatchedModel):
     return ForceModel(nctrl_f=id, ctrl2model=id1, model2ctrl=id1)
 
 
-class SceneData(cmisc.PatchedModel):
-  sctx: SceneContext
-  fm: ForceModel
-
-
 class RBBuilderEntry(cmisc.PatchedModel):
   spec: SolidSpec = None
   wl: Transform
@@ -833,6 +848,20 @@ class RBDescEntry(cmisc.PatchedModel):
   link_data: LinkData = Field(default_factory=LinkData)
 
 
+class NameRegister(cmisc.PatchedModel):
+  obj2name: dict[typing.Any, str] = Field(default_factory=dict)
+  name2cnt: dict[str, int] = Field(default_factory=lambda: cmisc.defaultdict(int))
+
+  def register(self, obj, proposal: str) -> str:
+    num = self.name2cnt[proposal]
+    self.name2cnt[proposal] += 1
+    if num:
+      proposal = f'{proposal}_{num:03d}'
+      assert proposal not in self.name2cnt
+    self.obj2name[obj] = proposal
+    return proposal
+
+
 class RBBuilderAcc(cmisc.PatchedModel):
   entries: list[RBBuilderEntry] = Field(default_factory=list)
   src_entries: list[RBDescEntry] = Field(default_factory=list)
@@ -841,29 +870,34 @@ class RBBuilderAcc(cmisc.PatchedModel):
 
   def build(self, link_data: LinkData, wl: Transform = None, center_com=True):
     l = self.entries
-    weights = [x.spec.mass for x in l]
+    weights = [x.spec.inertial.mass for x in l]
     mass = sum(weights)
 
-    com = Vec3.LinearComb([(x.wl @ x.spec.com, x.spec.mass / mass) for x in l])
+    com = Vec3.LinearComb([(x.wl @ x.spec.com, x.spec.inertial.mass / mass) for x in l])
     ocom = com
     if center_com:
       for x in l:
         x.wl = Transform.From(pos=-com) @ x.wl
-      com = Vec3.LinearComb([(x.wl @ x.spec.com, x.spec.mass / mass) for x in l])
+      com = Vec3.LinearComb([(x.wl @ x.spec.com, x.spec.inertial.mass / mass) for x in l])
       #com = Vec3.ZeroPt()
 
-    mesh = ComposedMeshDesc(
-        weights=weights,
-        meshes=[TransformedMeshDesc(mesh=x.spec.mesh, transform=x.wl) for x in l],
-    )
+    if len(l) == 1 and l[0].wl.is_id:
+      mesh = l[0].spec.mesh
+    else:
+      mesh = ComposedMeshDesc(
+          weights=weights,
+          meshes=[TransformedMeshDesc(mesh=x.spec.mesh, transform=x.wl) for x in l],
+      )
+
     it = sum(
-        [
-            x.spec.inertial_tensor.shift_inertial_tensor(com - x.wl @ x.spec.com,
-                                                         x.spec.mass).get_world_tensor(x.wl)
-            for x in l
-        ], InertialTensor()
+        [x.spec.inertial.shift(com - x.wl @ x.spec.com).get_world_tensor(x.wl) for x in l],
+        Inertial()
     )
-    spec = SolidSpec(mass=mass, com=com, mesh=mesh, inertial_tensor=it)
+    assert it.mass == mass
+    spec = SolidSpec(com=com, mesh=mesh, inertial=it)
+    if len(l) == 1:
+      spec.type = l[0].spec.type
+
     assert not spec.com.vec
     names = [x.data.base_name for x in self.src_entries if x.data.base_name != kDefaultName]
     agg_name = kDefaultName
@@ -880,7 +914,10 @@ class RBBuilderAcc(cmisc.PatchedModel):
     )
     rbl = RigidBodyLink(rb=rb, link_data=link_data)
     if wl is not None: rbl.link_data.spec.wr = wl
-    rbl.link_data.spec.rl = rbl.link_data.spec.rl @ Transform.From(pos=ocom - com)
+    if link_data.spec.type == RigidBodyLinkType.FREE:
+      rbl.link_data.spec.wr = rbl.link_data.spec.wr @ Transform.From(pos=ocom - com)
+    else:
+      rbl.link_data.spec.rl = rbl.link_data.spec.rl @ Transform.From(pos=ocom - com)
     return rbl
 
 
@@ -894,11 +931,12 @@ class RBTree(cmisc.PatchedModel):
   split_rigid: bool = False
 
   def add(self, entry: RBDescEntry) -> RBDescEntry:
-    #self.entries.append(entry)
+    self.entries.append(entry)
     self.entry2child[entry.parent].append(entry)
     return entry
 
   def add_link(self, cur: RBDescEntry, child: RigidBodyLink):
+    # TODO: clean this up - child_links / entry2child one is redundant?
     self.child_links[cur].append(child)
 
   def create(self, cur: RBDescEntry, wl=None, **kwargs) -> RigidBodyLink:
@@ -923,11 +961,62 @@ class RBTree(cmisc.PatchedModel):
     for x in static_children:
       self.dfs(x, wl @ x.link_data.wl, res)
 
+  def local_name(self, cur: RBDescEntry) -> str:
+    #TODO: cache this?
+    if (par := cur.parent) is None: return 'root'
+    children = self.entry2child[par]
+
+    names = NameRegister()
+    for entry in children:
+      cnd = entry.data.base_name
+      if cnd == kDefaultName:
+        cnd = f'{entry.link_data.spec.type}_{entry.spec.type}'
+      names.register(entry, cnd)
+
+    return names.obj2name[cur]
+
+  def path_name(self, cur: RBDescEntry) -> str:
+    name = self.local_name(cur)
+    if cur.parent is None: return name
+    return f'{self.path_name(cur.parent)}.{name}'
+
   def build(self):
     links = []
     for x in self.entry2child[None]:
       links.append(self.create(x))
     return links
+
+
+class SceneState(cmisc.PatchedModel):
+  t: float
+  root2data: dict[str, np.ndarray] = Field(default_factory=dict)
+
+
+class SceneData(cmisc.PatchedModel):
+  sctx: SceneContext
+  fm: ForceModel
+  tree: RBTree | None
+  idx: str = None
+
+
+class SceneSaver(cmisc.PatchedModel):
+  sd: SceneData
+  states: list[SceneState] = Field(default_factory=list)
+
+  def push_state(self, t):
+    res = SceneState(t=t)
+    for x in self.sd.sctx.roots:
+      res.root2data[x.name] = self.sd.sctx.sys_spec.dump_state(x.self_link, to_struct=False)
+    self.states.append(res)
+
+  def dump_obj(self):
+    assert self.sd.idx is not None
+    return A(idx=self.sd.idx, states=self.states)
+
+  @classmethod
+  def Load(cls, load_obj):
+    sd = SceneRegistar.Registar.get(load_obj.idx)()
+    return SceneSaver(sd=sd, states=load_obj.states)
 
 
 RigidBody.update_forward_refs()
@@ -1175,10 +1264,31 @@ class Simulator(cmisc.PatchedModel):
 class SceneRegistar(cmisc.PatchedModel):
   mp: dict[str, Callable[[], SceneData]] = Field(default_factory=dict)
 
-  def register(self, s: str, func: Callable[[], SceneData]) -> str:
-    assert not s in self.mp
+  def register(self, s: str, func: Callable[[], SceneData], force: bool = False) -> str:
+    assert force or s not in self.mp
     self.mp[s] = func
     return s
+
+  @classmethod
+  def reg_attr(cls, name: str = None):
+
+    dx = A(name=name)
+
+    def wrapper(f):
+
+      @cmisc.functools.wraps(f)
+      def wrap_f(*args, **kwargs):
+        res = f(*args, **kwargs)
+        res.idx = idx
+        return res
+
+      if dx.name is None:
+        dx.name = f.__name__
+      idx = cls.Registar.register(dx.name, wrap_f)
+      wrap_f.idx = idx
+      return wrap_f
+
+    return wrapper
 
   def get(self, s: str) -> Callable[[], SceneData]:
     return self.mp[s]
@@ -1215,7 +1325,7 @@ class ModelData(cmisc.PatchedModel):
     return self.func().sctx
 
   def create_simulator(self) -> Simulator:
-    return Simulator(sd=self.scene_data)
+    return Simulator(sd=self.func())
 
   @property
   def nctrl(self) -> int:

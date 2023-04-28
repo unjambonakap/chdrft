@@ -1,5 +1,6 @@
 #!/usr/bin/env python
 
+from __future__ import annotations
 from typing import Tuple, Optional, TYPE_CHECKING
 from dataclasses import dataclass
 from chdrft.cmds import CmdsList
@@ -18,7 +19,7 @@ from scipy.spatial.transform import Rotation as R
 from chdrft.display.base import TriangleActorBase
 from chdrft.utils.math import MatHelper
 import itertools
-from enum import Enum
+import enum
 import functools
 import sympy as sp
 import jax.numpy as jnp
@@ -177,7 +178,7 @@ class OpHelper:
     return np.array(m.inv())
 
   def solve(self, x, y):
-    if not is_sympy(x): return self.get_npx(x,y).linalg.solve(x, y)
+    if not is_sympy(x): return self.get_npx(x, y).linalg.solve(x, y)
     m = sp.Matrix(x)
     return np.array(list(m.solve(sp.Matrix(y))))
 
@@ -192,11 +193,18 @@ class Vec3(cmisc.PatchedModel):
   data: np_array_like = None
   vec: bool = True
 
+  def __getitem__(self, v):
+    return self.vdata[v]
+
   def __repr__(self) -> str:
     return str(self)
 
   def __str__(self) -> str:
     return f'{"PV"[self.vec]}({self.vdata})'
+
+  def to_gz(self):
+    from chdrft.sim.gz.helper import Conv
+    return Conv.vec2gz(self)
 
   def __init__(self, *args, data=None, vec=True):
     super().__init__()
@@ -222,24 +230,29 @@ class Vec3(cmisc.PatchedModel):
     assert self.data.shape == (4,)
 
   @property
-  def as_vec(self) -> "Vec3":
+  def as_vec(self) -> Vec3:
     return Vec3(self.vdata, vec=True)
 
   @property
-  def as_pt(self) -> "Vec3":
+  def as_pt(self) -> Vec3:
     return Vec3(self.vdata, vec=False)
 
   @staticmethod
-  def Pt(x) -> "Vec3":
+  def Pt(x) -> Vec3:
     return Vec3(x, vec=0)
 
   @staticmethod
-  def Vec(x) -> "Vec3":
+  def Vec(x) -> Vec3:
     return Vec3(x, vec=1)
 
   @staticmethod
   def Natif(v) -> np.ndarray:
     if isinstance(v, Vec3): return v.data
+    return v
+
+  @staticmethod
+  def NatifV(v) -> np.ndarray:
+    if isinstance(v, Vec3): return v.vdata
     return v
 
   @staticmethod
@@ -249,7 +262,7 @@ class Vec3(cmisc.PatchedModel):
     return Vec3(v, **kwargs)
 
   @staticmethod
-  def LinearComb(pt_w: "list[tuple[Vec3,float]]") -> "Vec3":
+  def LinearComb(pt_w: "list[tuple[Vec3,float]]") -> Vec3:
     res = np.zeros(3)
     for pt, w in pt_w:
       assert not pt.vec
@@ -292,7 +305,7 @@ class Vec3(cmisc.PatchedModel):
     )
 
   @property
-  def skew_transform(self) -> "Transform":
+  def skew_transform(self) -> Transform:
     return Transform.From(rot=self.skew_matrix)
 
   def __neg__(a):
@@ -306,28 +319,26 @@ class Vec3(cmisc.PatchedModel):
     return self
 
   def __add__(a, b):
-    assert a.vec
-    return a.like(a.canon.data + b.canon.data)
+    assert a.vec or b.vec
+    return Vec3(a.canon.data + b.canon.data, vec=a.vec and b.vec)
 
   def like(self, data):
     return Vec3(data, vec=self.vec)
 
-  def cross(self, peer: "Vec3") -> "Vec3":
+  def cross(self, peer: Vec3) -> Vec3:
     return Vec3(g_oph.cross(self.vdata, peer.vdata))
 
   def __mul__(a, b):
-    assert a.vec
-    return a.like(a.data * Vec3.Natif(b))
+    return a.like(a.vdata * Vec3.NatifV(b))
 
   def __sub__(a, b):
     return Vec3(a.canon.data - b.canon.data, vec=True)
 
   def __truediv__(a, b):
-    assert a.vec
-    return a.like(a.data / Vec3.Natif(b))
+    return a.like(a.vdata / Vec3.NatifV(b))
 
   @property
-  def canon(self) -> "Vec3":
+  def canon(self) -> Vec3:
     if self.vec: return self
     return Vec3(self.data / self.data[3])
 
@@ -339,22 +350,22 @@ class Vec3(cmisc.PatchedModel):
     vec = Vec3.Make(vec)
     return g_oph.dot(self.vdata, vec.vdata)
 
-  def proj(self, vec: "Vec3 | np.ndarray") -> "Vec3":
+  def proj(self, vec: "Vec3 | np.ndarray") -> Vec3:
     vec = Vec3.Make(vec)
     return Vec3.Make(vec * g_oph.dot(self.data, vec.data))
 
-  def orth_proj(self, vec: "Vec3 | np.ndarray") -> "Vec3":
+  def orth_proj(self, vec: "Vec3 | np.ndarray") -> Vec3:
     return self - self.proj(vec)
 
   @property
   def norm(self) -> float:
     return g_oph.norm(self.vdata)
 
-  def make_norm(self) -> "Vec3":
+  def make_norm(self) -> Vec3:
     return self.norm_and_uvec[1]
 
   @property
-  def uvec(self) -> "Vec3":
+  def uvec(self) -> Vec3:
     return self.make_norm()
 
   @property
@@ -374,7 +385,7 @@ class Vec3(cmisc.PatchedModel):
     res = np.identity(3) + g_oph.sin(rot) * w1 + (1 - g_oph.cos(rot)) * w2
     return res
 
-  def exp_rot_u(self, rot: float, around: "Vec3" = None) -> "Transform":
+  def exp_rot_u(self, rot: float, around: Vec3 = None) -> Transform:
     if around is None: around = Vec3.ZeroPt()
     assert not around.vec
     res = self.exp_rot_u_3(rot)
@@ -386,7 +397,7 @@ class Vec3(cmisc.PatchedModel):
     rot, v = self.norm_and_uvec
     return v.exp_rot_u_3(rot)
 
-  def exp_rot(self, around=None) -> "Transform":
+  def exp_rot(self, around=None) -> Transform:
     if 0:
       if around is None: around = Vec3.ZeroPt()
       w1 = self.skew_matrix
@@ -402,7 +413,7 @@ class Vec3(cmisc.PatchedModel):
     return v.exp_rot_u(rot, around)
 
 
-def get_axis_angle(r: np.ndarray) -> "Vec3":
+def get_axis_angle(r: np.ndarray) -> Vec3:
   npx = g_oph.get_npx(r)
   w = r - np.identity(3)
   ang = npx.arccos(npx.clip((npx.trace(r) - 1) / 2, -1, 1))  # in [0, pi]
@@ -442,19 +453,29 @@ class Transform(cmisc.PatchedModel):
     assert data.shape == (4, 4)
     super().__init__(data=data)
 
+  def clone(self):
+    return Transform(data=np.array(self.data))
+
+  def shift(self, dp: Vec3) -> Transform:
+    return Transform.From(pos=dp) @ self
+
   @property
-  def T(self) -> "Transform":
+  def is_id(self) -> bool:
+    return np.linalg.norm(self.data - np.identity(4)) < 1e-6
+
+  @property
+  def T(self) -> Transform:
     return Transform(np.array(self.data.T))
 
   @property
-  def inv(self) -> "Transform":
+  def inv(self) -> Transform:
     #return Transform(data=g_oph.inv(self.data))
     res = self.rot.T
     pos = -res @ self.pos
     return Transform.From(rot=res, pos=pos)
 
   @property
-  def invT(self) -> "Transform":
+  def invT(self) -> Transform:
     return self.inv.T
 
   def get_axis_angle(self) -> Vec3:
@@ -499,22 +520,38 @@ class Transform(cmisc.PatchedModel):
     else: self.data[:3, :3] = v
 
   @property
-  def tsf_rot(self) -> "Transform":
+  def tsf_rot(self) -> Transform:
     return Transform.From(rot=self.rot)
 
   @property
-  def tsf_xlt(self) -> "Transform":
+  def tsf_xlt(self) -> Transform:
     return Transform.From(pos=self.pos)
 
   @property
   def rot_R(self) -> R:
     return R.from_matrix(self.rot)
 
+  @property
+  def rot_wxyz(self) -> np.ndarray:
+    x, y, z, w = self.rot_xyzw
+    return np.array([w, x, y, z])
+
+  @property
+  def rot_xyzw(self) -> np.ndarray:
+    return self.rot_R.as_quat()
+
+  def get_scale(self) -> Vec3:
+    return Vec3.Vec(np.diag(self.data)[:3])
+
   def scale(self, v):
     res = self.data[:3, :3] * np.array(v)
     if isinstance(v, jnp.ndarray): self.data = jnp.array(self.data)
     if isinstance(self.data, jnp.ndarray): self.data = self.data.at[:3, :3].set(res)
     else: self.data[:3, :3] = res
+
+  def scale_p(self, scale: float = None) -> Transform:
+    if scale is None: return self
+    return Transform.From(rot=self.rot, pos=self.pos * scale)
 
   def apply(self, v: Vec3) -> Vec3:
     assert isinstance(v, Vec3)
@@ -545,8 +582,10 @@ class Transform(cmisc.PatchedModel):
       return peer.mat_tsf(self)
     if isinstance(peer, np.ndarray):
       return self.map(peer)
-    if isinstance(peer, InertialTensor):
-      return InertialTensor(data=self.rot @ peer.data)
+    if isinstance(peer, Inertial):
+      return Inertial(data=self.rot @ peer.data)
+    if isinstance(peer, AABB):
+      return AABB.FromPoints(self @ peer.points)
     return Transform(data=self.data @ peer.data)
 
   @staticmethod
@@ -576,13 +615,17 @@ class Transform(cmisc.PatchedModel):
     res = tsf * Transform.From(pos=pos, rot=rot, scale=scale)
     return res
 
-  def clone(self) -> "Transform":
+  def clone(self) -> Transform:
     return Transform.From(data=make_array(self.data))
+
+  def to_gz(self):
+    from chdrft.sim.gz.helper import Conv
+    return Conv.tsf2gz(self)
+
 
 def make_rot_ab(all_good=False, **kwargs) -> np.ndarray:
   #arg: x=a -> x = Ra
   return make_rot(all_good, T=True, **kwargs)
-
 
 
 def make_rot(all_good=False, T=False, **kwargs) -> np.ndarray:
@@ -615,8 +658,7 @@ def make_rot(all_good=False, T=False, **kwargs) -> np.ndarray:
 
   mat = np.zeros((3, 3))
   for p, v in tb:
-      mat[:, p] = v.data[:3]
-
+    mat[:, p] = v.data[:3]
 
   if T: mat = mat.T
   if np.linalg.det(mat) < 0:
@@ -625,6 +667,10 @@ def make_rot(all_good=False, T=False, **kwargs) -> np.ndarray:
         mat[:, i] *= -1
         break
   return mat
+
+
+def make_rot_tsf(all_good=False, **kwargs) -> Transform:
+  return Transform.From(rot=make_rot(all_good=all_good, **kwargs))
 
 
 class AngularSpeed(cmisc.PatchedModel):
@@ -663,6 +709,9 @@ class AABB:
     for i in range(self.n):
       v[i] *= (m >> i & 1)
     return Vec3.Pt(self.p + v)
+
+  def __or__(self, peer: AABB) -> AABB:
+    return AABB.FromPoints(np.concatenate((self.points, peer.points), axis=0))
 
   @property
   def points(self) -> np.ndarray:
@@ -911,12 +960,12 @@ class UnitConeDesc(MeshDesc):
 
   def surface_mesh(self, params: SurfaceMeshParams) -> TriangleActorBase:
     res = TriangleActorBase()
-    p0 = np.array([0, 0, -1 / 3])
-    p1 = np.array([0, 0, 2 / 3])
+    p0 = np.array([0, 0, -1 / 4])
+    p1 = np.array([0, 0, 3 / 4])
     id0, id1 = res.add_points([p0, p1])
     npt = 10
     alphal = np.linspace(0, 2 * np.pi, npt)
-    pl = res.add_points(np.array([np.cos(alphal), np.sin(alphal), alphal * 0 - 1 / 3]).T)
+    pl = res.add_points(np.array([np.cos(alphal), np.sin(alphal), alphal * 0 - 1 / 4]).T)
     for a, b in itertools.pairwise(cmisc.loop(range(npt))):
       res.push_triangle(np.array([id0, pl[a], pl[b]]))
       res.push_triangle(np.array([pl[b], pl[a], id1]))
@@ -1039,19 +1088,36 @@ class SphereDesc(MeshDesc):
     return res
 
 
-class InertialTensor(cmisc.PatchedModel):
+class Inertial(cmisc.PatchedModel):
 
   data: np.ndarray | jnp.ndarray = Field(default_factory=lambda: np.zeros((3, 3)))
+  mass: float = 0
 
-  def shift_inertial_tensor(self, p: Vec3, mass) -> "InertialTensor":
-    return self + InertialTensor.FromPointMass(p, mass)
+  def to_gz(self):
+    from chdrft.sim.gz.helper import Conv
+    return Conv.inertial2gz(self)
 
-  def get_world_tensor(self, wl: Transform) -> "InertialTensor":
+  @property
+  def diag_force(self) -> Vec3:
+    d = self.data.diagonal()
+    nx = np.linalg.norm(self.data - np.diag(d))
+    if nx > 1e-6:
+      raise ValueError('should be diagonal')
+    return Vec3(d)
+
+  @property
+  def zero_mass(self) -> Inertial:
+    return Inertial(data=self.data)
+
+  def shift(self, p: Vec3) -> Inertial:
+    return self.zero_mass + Inertial.FromPointMass(p, self.mass)
+
+  def get_world_tensor(self, wl: Transform) -> Inertial:
     m = wl.rot @ self.data @ wl.rot.T
-    return InertialTensor(data=m)
+    return Inertial(data=m, mass=self.mass)
 
-  def __add__(self, v) -> "InertialTensor":
-    return InertialTensor(data=self.data + v.data)
+  def __add__(self, v) -> Inertial:
+    return Inertial(data=self.data + v.data, mass=self.mass + v.mass)
 
   def around(self, v) -> float:
     return v @ self.data @ v
@@ -1065,9 +1131,9 @@ class InertialTensor(cmisc.PatchedModel):
     return Vec3(g_oph.solve(self.data, v.vdata))
 
   @staticmethod
-  def DFromPointMass(p: Vec3, dp: Vec3, mass: float) -> "InertialTensor":
-    grad = InertialTensor.GradFromPointMass(p, mass)
-    return InertialTensor(data=grad @ dp.vdata)
+  def DFromPointMass(p: Vec3, dp: Vec3, mass: float) -> Inertial:
+    grad = Inertial.GradFromPointMass(p, mass)
+    return Inertial(data=grad @ dp.vdata, mass=mass)
 
   @staticmethod
   def GradFromPointMass(p: Vec3, mass: float) -> np.ndarray:
@@ -1081,7 +1147,7 @@ class InertialTensor(cmisc.PatchedModel):
     return np.array(mx) * mass
 
   @staticmethod
-  def FromPointMass(p: Vec3, mass: float) -> "InertialTensor":
+  def FromPointMass(p: Vec3, mass: float) -> Inertial:
     assert p.vec
     px, py, pz = p.vdata
     mx = [
@@ -1090,10 +1156,10 @@ class InertialTensor(cmisc.PatchedModel):
         [-px * pz, -py * pz, py * py + px * px],
     ]
 
-    return InertialTensor(data=make_array(mx, type_hint=p.data) * mass)
+    return Inertial(data=make_array(mx, type_hint=p.data) * mass, mass=mass)
 
   @staticmethod
-  def FromPoints(pts, weights=None, com=False, mass=1):
+  def FromPoints(pts, weights=None, com=False, mass=1) -> np.ndarray:
     r = pts
     if weights is None: weights = np.full(len(pts), 1)
     sweight = sum(weights)
@@ -1106,12 +1172,20 @@ class InertialTensor(cmisc.PatchedModel):
     return res
 
 
-class SolidSpec(cmisc.PatchedModel):
-  mass: float = 0
-  com: Vec3 = Field(default_factory=Vec3.ZeroPt)
-  inertial_tensor: InertialTensor = Field(default_factory=InertialTensor)
-  mesh: MeshDesc = Field(default_factory=MeshDesc)
+class SolidSpecType(enum.Enum):
+  POINT = enum.auto()
+  CONE = enum.auto()
+  SPHERE = enum.auto()
+  CYLINDER = enum.auto()
+  BOX = enum.auto()
+  OTHER = enum.auto()
 
+
+class SolidSpec(cmisc.PatchedModel):
+  com: Vec3 = Field(default_factory=Vec3.ZeroPt)
+  inertial: Inertial = Field(default_factory=Inertial)
+  mesh: MeshDesc = Field(default_factory=MeshDesc)
+  type: SolidSpecType = SolidSpecType.OTHER
 
   def __init__(self, **kwargs):
     super().__init__(**kwargs)
@@ -1120,7 +1194,9 @@ class SolidSpec(cmisc.PatchedModel):
   @staticmethod
   def Point(mass):
     return SolidSpec(
-        mass=mass, inertial_tensor=InertialTensor(data=np.zeros((3, 3))), desc=PointMesh()
+        type=SolidSpecType.POINT,
+        inertial=Inertial(data=np.zeros((3, 3)), mass=mass),
+        desc=PointMesh()
     )
 
   @staticmethod
@@ -1129,8 +1205,8 @@ class SolidSpec(cmisc.PatchedModel):
     iz = 3 / 10 * r**2
     mesh = TransformedMeshDesc(mesh=UnitConeDesc(), transform=Transform.From(scale=[r, r, h]))
     return SolidSpec(
-        mass=mass,
-        inertial_tensor=InertialTensor(data=np.identity(3) * mass * np.array([ix, iy, iz])),
+        type=SolidSpecType.CONE,
+        inertial=Inertial(data=np.identity(3) * mass * np.array([ix, iy, iz]), mass=mass),
         mesh=mesh
     )
 
@@ -1138,15 +1214,17 @@ class SolidSpec(cmisc.PatchedModel):
   def Sphere(mass, r):
     v = mass * 2 / 5 * r**2
     mesh = TransformedMeshDesc(mesh=SphereDesc(), transform=Transform.From(scale=r))
-    return SolidSpec(mass=mass, inertial_tensor=InertialTensor(data=np.identity(3) * v), mesh=mesh)
+    return SolidSpec(
+        type=SolidSpecType.SPHERE, inertial=Inertial(data=np.identity(3) * v, mass=mass), mesh=mesh
+    )
 
   @staticmethod
   def Cylinder(mass, r, h):
     iz = 1 / 2 * mass * r**2
     ix = iz / 2 + mass * h**2 / 12
     return SolidSpec(
-        mass=mass,
-        inertial_tensor=InertialTensor(data=np.diag(np.array([ix, ix, iz]))),
+        type=SolidSpecType.CYLINDER,
+        inertial=Inertial(data=np.diag(np.array([ix, ix, iz])), mass=mass),
         mesh=TransformedMeshDesc(
             mesh=UnitCylinderDesc(), transform=Transform.From(scale=[r, r, h])
         ),
@@ -1157,9 +1235,10 @@ class SolidSpec(cmisc.PatchedModel):
     c = mass / 12
     mesh = TransformedMeshDesc(mesh=CubeDesc(), transform=Transform.From(scale=[x, y, z]))
     return SolidSpec(
-        mass=mass,
-        inertial_tensor=InertialTensor(
-            data=np.diag(np.array([y * y + z * z, x * x + z * z, x * x + y * y])) * c
+        type=SolidSpecType.BOX,
+        inertial=Inertial(
+            data=np.diag(np.array([y * y + z * z, x * x + z * z, x * x + y * y])) * c,
+            mass=mass,
         ),
         mesh=mesh
     )

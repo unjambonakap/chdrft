@@ -17,6 +17,7 @@ from chdrft.sim.rb.rb_gen import *
 from chdrft.sim.rb.ctrl import *
 from chdrft.sim.rb.scenes import *
 import pygmo as pg
+from IPython import embed
 
 global flags, cache
 flags = None
@@ -29,6 +30,7 @@ def args(parser):
   parser.add_argument('--use-rk4', action='store_true')
   parser.add_argument('--full-jit', action='store_true')
   parser.add_argument('--render', action='store_true')
+  parser.add_argument('--embed', action='store_true')
   parser.add_argument('--scene-name')
   ActionHandler.Prepare(parser, clist.lst, global_action=1)
 
@@ -133,23 +135,17 @@ def func_test_scene(ctx, scene_idx, qd0: np.ndarray=None, s0: ControlInputState 
   root = sh.sim.rootl
   dt = 1e-2
   ss = sh.sim.ss
-  if ctx.render:
-    root.get_particles(10000).plot(by_col=1)
-    input()
-    return
 
   for x, name in sh.sim.sd.sctx.obj2name.items():
     print(name, x.self_link.wl)
 
-  idd = inverse_dynamics(InverseDynamicsData.Make(sh.sim.sd, np.array([-0.1, 0])), root).f_map
+  idd = inverse_dynamics(InverseDynamicsData.Make(sh.sim.sd, mdata.ss.qd_desc.default), root).f_map
   print('>>> ', idd)
-  return
 
   fdata = ForwardDynamicsData(fq=ss.f_desc.default)
   res = forward_dynamics(fdata, sh.sim.sd)
   print(ss.f_desc.unpack(res.sd))
   print(res)
-  return
 
   mom0 = sh.sim.mom
   parts = sh.sim.rootl.get_particles(1000000)
@@ -161,6 +157,14 @@ def func_test_scene(ctx, scene_idx, qd0: np.ndarray=None, s0: ControlInputState 
   print('mom')
   print(mom0.around(root.agg_com))
   print(mom0)
+
+  if ctx.render:
+    root.get_particles(10000).plot(by_col=1)
+    input()
+    return
+  if ctx.embed:
+    embed()
+    return
 
   ctrl = np.zeros(sh.spec.mdata.nctrl)
   stats = []
@@ -182,6 +186,7 @@ def func_test_scene(ctx, scene_idx, qd0: np.ndarray=None, s0: ControlInputState 
 
 def test_scenes(ctx):
   #return func_test_scene(ctx, two_mass_idx, np.array([1,0,0,0,0,0]))
+  return func_test_scene(ctx, scene_T_idx, qd0=np.array([0, 0, 0, 0, 0, 0.01]))
   return func_test_scene(ctx, scene_gyro_wheel_idx)
 
   if 0:

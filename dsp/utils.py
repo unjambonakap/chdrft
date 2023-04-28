@@ -11,6 +11,7 @@ import chdrft.utils.misc as cmisc
 import glog
 import chdrft.utils.Z as Z
 import numpy as np
+import math
 
 
 
@@ -36,6 +37,8 @@ def linearize_clamp(x, a, b, na, nb):
   tmp = linearize(x, a, b, na, nb)
   return np.clip(tmp, na, nb)
 
+def sigmoid(t, vl):
+  return linearize(1 / (1 + math.exp(-t)), (0, 1), vl)
 
 
 def to_db(p):
