@@ -105,6 +105,7 @@ class CacheDB(object):
 
   def clear(self):
     self._confobj.clear()
+
   def clean(self):
     self._confobj.clear()
 
@@ -248,7 +249,15 @@ class Cachable:
     return '__func#{}'.format(func.__name__)
 
   @staticmethod
-  def _cachable_get_full_key(cache, key, args, kwargs, self=None, opa_fields=None):
+  def _cachable_get_full_key(
+      cache,
+      key,
+      args,
+      kwargs,
+      self=None,
+      opa_fields=None,
+      args_serializer=None,
+  ):
     if self is not None:
       cacheobj = Cachable.GetCacheObj(self)
       if opa_fields is None: opa_fields = cacheobj.get('fields', None)
@@ -259,12 +268,23 @@ class Cachable:
         selfdata.append(getattr(self, field))
       return cache.get_str2([key, selfdata, args, kwargs])
 
+    if args_serializer is not None:
+      args, kwargs = args_serializer(*args, **kwargs), None
     if self is not None: args = (id(self),) + tuple(args)
     return cache.get_str2([key, args, kwargs])
 
   @staticmethod
   def proc_cached(
-      cache, key, f, args, kwargs, self=None, opa_fields=None, opa_fullkey=None, id_self=0
+      cache,
+      key,
+      f,
+      args,
+      kwargs,
+      self=None,
+      opa_fields=None,
+      opa_fullkey=None,
+      id_self=0,
+      args_serializer=None,
   ):
     iself = self
     if self is not None and id_self: iself = id(self)
@@ -272,7 +292,13 @@ class Cachable:
     full_key = opa_fullkey
     if full_key is None:
       full_key = Cachable._cachable_get_full_key(
-          cache, key, args, kwargs, self=iself, opa_fields=opa_fields
+          cache,
+          key,
+          args,
+          kwargs,
+          self=iself,
+          opa_fields=opa_fields,
+          args_serializer=args_serializer,
       )
     elif not isinstance(full_key, str):
       full_key = cache.get_str2(full_key)
@@ -332,7 +358,7 @@ class Cachable:
     Cachable.GetCache(fileless).clear()
 
   @staticmethod
-  def cachedf(alt_key=None, fileless=True, method=False):
+  def cachedf(alt_key=None, fileless=True, method=False, args_serializer=None):
 
     def cached_wrap(f):
 
@@ -341,7 +367,15 @@ class Cachable:
         self = None
         if method:
           self, *args = args
-        return Cachable.proc_cached(Cachable.GetCache(fileless), key, f, args, kwargs, self=self)
+        return Cachable.proc_cached(
+            Cachable.GetCache(fileless),
+            key,
+            f,
+            args,
+            kwargs,
+            self=self,
+            args_serializer=args_serializer
+        )
 
       return cached_f
 

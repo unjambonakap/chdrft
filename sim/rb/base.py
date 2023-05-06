@@ -505,6 +505,12 @@ class Transform(cmisc.PatchedModel):
   def pos(self, v):
     self.data = g_oph.set(self.data, v[:3])[:3, 3]
 
+
+  def update(self, **kwargs) -> Transform:
+    for k,v in kwargs.items():
+      setattr(self, k, v)
+    return self
+
   @pos_v.setter
   def pos_v(self, v):
     self.pos = v.vdata
