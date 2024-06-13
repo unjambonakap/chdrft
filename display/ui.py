@@ -6,7 +6,6 @@ import numpy as np
 import pyqtgraph as pg
 pg.setConfigOption('imageAxisOrder', 'row-major')  # fuckoff
 
-import pyqtgraph.ptime as ptime
 import scipy.ndimage as ndimage
 from scipy import signal
 import glog
@@ -666,7 +665,7 @@ class OpaPlot(pg.PlotWidget):
     self.getPlotItem().showGrid(x=True, y=True)
 
   def get_color(self):
-    if 0:
+    if 1:
       self.used_color = self.color_pool.get_rgb()
     else:
       self.used_color = self.cpool2().rgb[0] * 255
@@ -689,6 +688,8 @@ class OpaPlot(pg.PlotWidget):
       plot_entry = Dataset(plot_entry)
 
     if isinstance(plot_entry, Dataset):
+      if len(plot_entry.y.shape) == 2:
+        return [self.add_plot(subds, **kwargs) for subds in plot_entry.sub_datasets()]
       plot_entry = PlotEntry(plot_entry, **kwargs)
     glog.info('Adding plot with name=%s', plot_entry.data.name)
 

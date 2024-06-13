@@ -16,7 +16,6 @@ import numpy as np
 import numpy as np
 import pandas as pd
 import pyqtgraph as pg
-import pyqtgraph.ptime as ptime
 import scipy.ndimage as ndimage
 import sys
 import tempfile
@@ -234,6 +233,9 @@ class Dataset:
     if isinstance(self.y, list):
       self.y = np.array(self.y)
     glog.info('Creating dataset name=%s, samp_rate=%s', self.name, self.samp_rate)
+
+  def sub_datasets(self):
+    return [self.make(x=self.x, y=self.y[:,i], name = f'{self.name}[{i}]') for i in range(self.y.shape[1])]
 
   def __len__(self):
     return self.n

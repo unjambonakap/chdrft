@@ -10,7 +10,7 @@ import chdrft.utils.misc as cmisc
 import glog
 import numpy as np
 from chdrft.utils.types import *
-from pydantic import BaseModel, Field
+from pydantic.v1 import BaseModel, Field
 from typing import Tuple
 import xarray as xr
 from typing import Callable, List
@@ -32,7 +32,7 @@ from chdrft.sim.rb.old.rb import *
 from chdrft.sim.rb.old.rb_analysis import *
 from chdrft.inputs.controller import OGamepad, SceneControllerInput
 from chdrft.utils.rx_helpers import ImageIO, rx, pipe_connect
-from pydantic import Field
+from pydantic.v1 import Field
 from chdrft.display.ui import TimerHelper
 
 global flags, cache

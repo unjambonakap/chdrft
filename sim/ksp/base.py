@@ -10,7 +10,7 @@ from chdrft.utils.misc import Attributize as A
 import glog
 import chdrft.utils.Z as Z
 import numpy as np
-from pydantic import Field
+from pydantic.v1 import Field
 import krpc
 from scipy.spatial.transform import Rotation as R
 import time
@@ -69,6 +69,7 @@ class KRPCUtils(cmisc.PatchedModel):
   def get_body(self, body_name: str) -> "krpc.spacecenter.SpaceCenter.CelestialBody":
     return self.conn.space_center.bodies[body_name]
 
+
   def set_cam(
       self, tsf: R | None, target_part: object | None = None, target_vessel: object | None = None
   ):
@@ -91,21 +92,28 @@ class Vessel(cmisc.PatchedModel):
   def internal(self) -> "krpc.spacecenter.SpaceCenter.Vessel":
     return self.internal_
 
+  def get_position(self, rf) -> Vec3:
+    return Vec3.Pt(self.internal.position(rf))
+
   @property
   def engines(self) -> "list[krpc.spacecenter.SpaceCenter.Engine]":
     return self.internal.active_engines
+
+  def get_resources(self, name):
+    return self.internal.resources.with_resource(name)
 
   @property
   def resources(self):
     rscs = set()
     for engine in self.internal.active_engines:
       for prop in engine.propellants:
-        for rsc in vessel.resources.with_resource_by_id(prop.id):
+        for rsc in self.internal.resources.with_resource_by_id(prop.id):
           rscs.add(rsc)
     return rscs
 
-  def set_prop(self, v: float, target_name: str = None):
-    for rsc in self.resources:
+  def set_prop(self, v: float, target_name: str = None, resources=None):
+    if resources is None: resources = self.resources
+    for rsc in resources:
       if target_name is None or target_name == rsc.part.name:
         rsc.amount = rsc.max * v
 
@@ -121,7 +129,7 @@ class Vessel(cmisc.PatchedModel):
     g_utils.conn.nop(req_phys_loop=1)
     actual = np.array(self.internal.velocity(ref_frame))
     rb_v = self.internal.rb_velocity(ref_frame)
-    self.internal.set_velocity(-np.array(actual) + rb_v, ref_frame)
+    self.internal.set_velocity(v.vdata + -np.array(actual) + rb_v, ref_frame)
 
   def wl(self, ref_frame=None) -> Transform:
     world = False
@@ -143,7 +151,7 @@ class Vessel(cmisc.PatchedModel):
       e0.gimbal.set_gimbal_rot(tuple(r))
 
   def compute_bg(self, e0: "krpc.spacecenter.SpaceCenter.Engine") -> Transform:
-    wb = xyzw2rot(v.internal.reference_frame.rotation)
+    wb = xyzw2rot(self.internal.reference_frame.rotation)
     wg = xyzw2rot(e0.gimbal.rotation(0))
     return wb.inv @ wg
 

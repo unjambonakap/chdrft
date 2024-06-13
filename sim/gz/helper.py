@@ -9,7 +9,7 @@ from chdrft.utils.misc import Attributize as A
 import glog
 import numpy as np
 from chdrft.utils.types import *
-from pydantic import Field
+from pydantic.v1 import Field
 from chdrft.utils.path import FileFormatHelper
 import chdrft.sim.rb.rb_gen as rb_gen
 import chdrft.sim.rb.base as rb_base
@@ -31,7 +31,7 @@ from gz.math7 import Vector3d
 from gz import sim7, math7
 import sdformat13 as sdf
 import chdrft.sim.rb.base as rb_base
-import pydantic
+import pydantic.v1 as pydantic
 from chdrft.utils.rx_helpers import ImageIO
 
 from gz import msgs

@@ -173,7 +173,7 @@ class ProcHelper:
   def get_ppid(self):
     with open(self.status_file % self.pid, 'r') as f:
       status = f.read()
-      m = re.search('PPid:\W+([0-9]+)', status)
+      m = re.search(r'PPid:\W+([0-9]+)', status)
       return int(m.group(1))
 
 

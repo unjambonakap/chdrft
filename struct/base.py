@@ -24,6 +24,7 @@ kInfInt = 2**100
 
 
 class Range1D:
+
   @staticmethod
   def Union(rlist):
     return functools.reduce(Range1D.union, rlist)
@@ -93,10 +94,9 @@ class Range1D:
     elif high is not None and n is not None:
       low = high + n
     elif low is not None and center is not None:
-      high = 2*center-low
+      high = 2 * center - low
     elif high is not None and center is not None:
-      low = 2*center-high
-
+      low = 2 * center - high
 
     if low is None:
       if is_int: low = -kInfInt
@@ -286,6 +286,7 @@ class Range1D:
   @property
   def dim(self):
     return self.n
+
   @property
   def size(self):
     return self.n
@@ -412,10 +413,16 @@ class Range1DWithData(Range1D):
 
 
 class Range2D:
+  xr: np.ndarray
+  yr: np.ndarray
+  dim: np.ndarray
+  low: np.ndarray
+  high: np.ndarray
 
   @staticmethod
   def All(is_int=0):
     return Range2D(Range1D.All(is_int=is_int), Range1D.All(is_int=is_int))
+
   @staticmethod
   def Empty(is_int=0):
     return Range2D(Range1D.Empty(is_int=is_int), Range1D.Empty(is_int=is_int))
@@ -687,8 +694,10 @@ class Range2D:
       return self
     return self.make_new(self.xr.union(other.xr), self.yr.union(other.yr))
 
-  def make_zero_image(self, yx=1, **kwargs):
-    return np.zeros(self.get_dim(yx), **kwargs)
+  def make_zero_image(self, yx=1, nchannels=None, **kwargs):
+    if nchannels is None:
+      return np.zeros((*self.get_dim(yx),), **kwargs)
+    return np.zeros((*self.get_dim(yx), nchannels), **kwargs)
 
   @property
   def window_yx(self):
@@ -1048,12 +1057,11 @@ class Range2D:
 
   def to_vispy_transform(self, zpos=0):
     from vispy.visuals import transforms
-    return transforms.STTransform(
-        scale=self.dim, translate=(
-            self.low[0],
-            self.low[1],
-            zpos,
-        ))
+    return transforms.STTransform(scale=self.dim, translate=(
+        self.low[0],
+        self.low[1],
+        zpos,
+    ))
 
   @staticmethod
   def FromArray(a):
@@ -1080,6 +1088,10 @@ class Range2D:
   @staticmethod
   def FromCorners(low, high):
     return Range2D(Range1D(low[0], high[0]), Range1D(low[1], high[1]))
+
+  @staticmethod
+  def FromTuple(t):
+    return Range2D.FromCorners(*t)
 
   @staticmethod
   def FromPoints(pts, **kwargs):
@@ -1156,10 +1168,14 @@ class GenBox:
       if d >> i & 1:
         p += self.vec(opa_math.unit_vec(i, self.n))
     return self.norm_shape(p, None)
+
   @property
-  def low(self): return self.p
+  def low(self):
+    return self.p
+
   @property
-  def high(self): return self.p + self.v
+  def high(self):
+    return self.p + self.v
 
   @property
   def shapely(self):
@@ -1293,6 +1309,7 @@ class Intervals:
     for v in self.xl:
       res.append(dataset[max(0, v.low):v.high])
     return res
+
   def make_new(self):
     return Intervals(is_int=self.is_int, merge_dist=self.merge_dist, merge=self.merge)
 

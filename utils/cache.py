@@ -86,7 +86,7 @@ class CacheDB(object):
       return self._confobj[name]
 
   def __setattr__(self, name, val):
-    if name.startswith('_'):
+    if isinstance(name, str) and name.startswith('_'):
       super().__setattr__(name, val)
     else:
       self._confobj[name] = val
@@ -257,6 +257,7 @@ class Cachable:
       self=None,
       opa_fields=None,
       args_serializer=None,
+    key_serializer=None,
   ):
     if self is not None:
       cacheobj = Cachable.GetCacheObj(self)
@@ -271,6 +272,8 @@ class Cachable:
     if args_serializer is not None:
       args, kwargs = args_serializer(*args, **kwargs), None
     if self is not None: args = (id(self),) + tuple(args)
+    if key_serializer is not None:
+      return key_serializer(key, args, kwargs)
     return cache.get_str2([key, args, kwargs])
 
   @staticmethod
@@ -285,6 +288,7 @@ class Cachable:
       opa_fullkey=None,
       id_self=0,
       args_serializer=None,
+      key_serializer=None,
   ):
     iself = self
     if self is not None and id_self: iself = id(self)
@@ -299,6 +303,7 @@ class Cachable:
           self=iself,
           opa_fields=opa_fields,
           args_serializer=args_serializer,
+      key_serializer=key_serializer,
       )
     elif not isinstance(full_key, str):
       full_key = cache.get_str2(full_key)
@@ -358,7 +363,7 @@ class Cachable:
     Cachable.GetCache(fileless).clear()
 
   @staticmethod
-  def cachedf(alt_key=None, fileless=True, method=False, args_serializer=None):
+  def cachedf(alt_key=None, fileless=True, method=False, args_serializer=None, key_serializer=None):
 
     def cached_wrap(f):
 
@@ -374,7 +379,8 @@ class Cachable:
             args,
             kwargs,
             self=self,
-            args_serializer=args_serializer
+            args_serializer=args_serializer,
+          key_serializer=key_serializer,
         )
 
       return cached_f

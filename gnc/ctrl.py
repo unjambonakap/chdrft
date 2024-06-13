@@ -8,7 +8,7 @@ from chdrft.utils.misc import Attributize as A
 import glog
 import numpy as np
 from chdrft.utils.types import *
-from pydantic import Field
+from pydantic.v1 import Field
 from chdrft.utils.path import FileFormatHelper
 from chdrft.struct.base import Range1D
 import math

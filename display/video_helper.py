@@ -27,7 +27,7 @@ import cv2
 import sortedcontainers
 import chdrft.display.grid as grid
 from vispy.plot import Fig
-from pydantic import Field
+from pydantic.v1 import Field
 from typing import ClassVar
 
 from PyQt5 import QtCore

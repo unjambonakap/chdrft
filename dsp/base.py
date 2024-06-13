@@ -16,6 +16,7 @@ import chdrft.algo.viterbi as viterbi
 from chdrft.utils.swig import swig
 import math
 from gnuradio import digital
+
 digital.pfb_clock_sync_ccf
 
 try:
@@ -1448,6 +1449,7 @@ def test_enc(ctx):
 def test_full_fec(ctx):
   np.random.seed(1)
   lrit = LRIT()
+  from chdrft.interactive.base import create_kernel
 
   data = np.random.randint(2, size=g_d.LRIT_VCDU_SIZE * 8 * 10).astype(np.int32)
   print(len(data))
@@ -1476,7 +1478,7 @@ def test_full_fec(ctx):
   print(len(res), len(data))
 
   print(Z.min_substr_diff(data, res, mod_req=g_d.LRIT_VCDU_SIZE * 8), len(data))
-  Z.create_kernel()
+  create_kernel()
 
 
 def test_fec(ctx):
@@ -1501,6 +1503,7 @@ def test_lrit(ctx):
 
 
 def try_dec_lrit(output):
+  from chdrft.interactive.base import create_kernel
   lrit = LRIT()
   res = list(ConvViterbi.Solve(output, lrit.conv_enc, collapse_depth=30))
   pos = 0
@@ -1514,11 +1517,11 @@ def try_dec_lrit(output):
     res = Z.pickle.dump(res, open('/tmp/data.unconv.pickle', 'wb'))
     return
 
-  Z.create_kernel()
+  create_kernel()
   return
   u = lrit.irs_block.feed(res)
   print(lrit.irs_block.decode_blocks)
-  Z.create_kernel()
+  create_kernel()
 
 
 def test_dec_lrit(ctx):

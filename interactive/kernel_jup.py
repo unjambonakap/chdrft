@@ -13,7 +13,7 @@ import traceback as tb
 import time
 from jupyter_core.paths import jupyter_runtime_dir, jupyter_path
 from ipykernel.kernelapp import IPKernelApp
-from notebook.services.kernels.kernelmanager import MappingKernelManager
+from jupyter_server.services.kernels.kernelmanager import MappingKernelManager
 from jupyter_client.kernelspec import KernelSpecManager, KernelSpec, NoSuchKernel
 from tornado import gen
 from tornado.concurrent import Future

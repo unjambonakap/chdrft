@@ -298,9 +298,11 @@ class MathUtils:
     self.pw = pw
 
     for i in range(1, n + 1):
-      self.fact[i] = self.fact[i - 1] * int(gmpy2.powmod(i, self.pw, self.mod))
       if mod is not None:
+        self.fact[i] = self.fact[i - 1] * int(gmpy2.powmod(i, self.pw, self.mod))
         self.fact[i] %= mod
+      else:
+        self.fact[i] = self.fact[i - 1] *( i ** self.pw)
 
     if mod is None:
       self.ifact = None
@@ -321,14 +323,23 @@ class PrimeUtils:
     self.primes = [2]
     self.n = n
     self.prev = [1] * n
-    self.prev[2] = 1
     self.prev[1] = -1
+    self.prime2pos={2:0}
 
-    for i in range(3, n, 2):
-      if self.prev[i] != -1: continue
+    for i in range(2, n):
+      if self.prev[i] != 1: continue
+      self.prime2pos[i] = len(self.primes)
       self.primes.append(i)
       for j in range(i * i, n, i):
         self.prev[j] = j // i
+
+  def decomp(self, x) -> list[int]:
+    t = []
+    while x!=1:
+      nx = self.prev[x]
+      t.append(x//nx)
+      x = nx
+    return t
 
 
 def main():

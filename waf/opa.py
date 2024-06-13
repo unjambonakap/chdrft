@@ -261,6 +261,22 @@ class WafPkg(WafBasePkg):
         package=self.libname, args='--cflags --libs', uselib_store=self.name, mandatory=True)
 
 
+class WafCeres(WafPkg):
+
+  def __init__(self):
+    super().__init__('ceres')
+
+
+class WafGPMFParser(WafPkg):
+
+  def __init__(self):
+    super().__init__('gpmf-parser')
+
+class WafNLohmannJson(WafPkg):
+
+  def __init__(self):
+    super().__init__('nlohmann_json')
+
 class WafLemon(WafPkg):
 
   def __init__(self):
@@ -301,11 +317,6 @@ class WafGlew(WafPkg):
     super().__init__('glew')
 
 
-class WafGlm(WafPkg):
-
-  def __init__(self):
-    super().__init__('glm')
-
 class WafQgis(WafPkg):
 
   def __init__(self):
@@ -342,7 +353,7 @@ class WafOpenSSL(WafPkg):
 class WafOpenCV(WafPkg):
 
   def __init__(self):
-    super().__init__('opencv-noviz')
+    super().__init__('opencv4')
 
 
 class WafZeroMQ(WafPkg):
@@ -361,6 +372,11 @@ class WafGlog(WafPkg):
 
   def __init__(self):
     super().__init__('libglog')
+
+class WafGTest(WafPkg):
+
+  def __init__(self):
+    super().__init__('gtest')
 
 
 class WafProtobuf(WafPkg):
@@ -408,6 +424,13 @@ class WafPLLL(WafBasePkg):
 
   def register(self, ctx):
     ctx.check_cxx(lib='plll', uselib_store=self.name)
+
+class WafGlm(WafBasePkg):
+  name = 'WAF_GLM'
+
+  def register(self, ctx):
+    ctx.check_cxx(lib='glm', uselib_store=self.name)
+
 
 
 class WafPython(WafBasePkg):
@@ -491,6 +514,11 @@ class WafGZ(WafPkgList):
   def __init__(self):
     super().__init__('gz-physics6', 'gz-common5', 'gz-math7', 'gz-transport12', 'gz-msgs9', 'gz-plugin2', 'gz-sim7', 'gz-gui7')
 
+class WafEigen(WafPkg):
+  """Eigen"""
+
+  def __init__(self):
+    super().__init__('eigen3')
 
 
 class WafPackages:
@@ -528,11 +556,15 @@ class WafPackages:
   PythonEmbed = WafPythonEmbed()
   CGAL = WafCGAL()
   Qgis = WafQgis()
+  Eigen = WafEigen()
+  GTest = WafGTest()
   #dwf = WafDwf()
+  GPMFParser = WafGPMFParser()
+  Ceres = WafCeres()
+  Json = WafNLohmannJson()
 
 
 class WafLibs:
-  GTest_N = '@gtest'
   Crypto_N = '@crypto'
   CryptoLa_N = '@cryptola'
   CryptoStream_N = '@cryptostream'
@@ -739,7 +771,7 @@ class ClOpaWaf:
     else:
       ctx.env.append_value('CFLAGS', ['-fPIC', '-Wreturn-type',])
       ctx.env.append_value('CXXFLAGS',
-                           ['-fPIC', '-std=c++20', '-Wreturn-type', '-Wno-stringop-overflow', '-Wno-unknown-warning-option', '-Wno-attributes',
+                           ['-fPIC', '-std=c++2b', '-Wreturn-type', '-Wno-stringop-overflow', '-Wno-unknown-warning-option', '-Wno-attributes',
                              ])
 
       ctx.env.append_value('CFLAGS', ['-Wno-error'])
@@ -978,6 +1010,8 @@ class ExtraConf:
         if not 'cxxstlib' in features:
           features.append('cxxshlib')
 
+    if 'cxxshlib' in features and not  'cxx' in features:
+      features.append('cxx')
     tsf_features = []
     for feature in features:
       if feature == 'cxxshlib' and opa_waf.pin_mode:
@@ -1463,7 +1497,7 @@ class WafBuilder:
     if not self.has_child(srcs):
       return []
 
-    return self.create_conf(self.typ.TEST).update(libs=self.libs.GTest_N, sources=srcs, binary=True)
+    return self.create_conf(self.typ.TEST).update(libs=self.packages.GTest, sources=srcs, binary=True)
 
   def auto_proto_base(self, proto_base, features, typ):
     base, proto_files = opa_waf.get_proto(self.path, proto_base)

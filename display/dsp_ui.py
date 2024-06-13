@@ -1,8 +1,7 @@
 import sys
-from pyqtgraph.Qt import QtGui, QtCore, USE_PYSIDE, USE_PYQT5
+from chdrft.config.env import qt_imports
 import numpy as np
 import pyqtgraph as pg
-import pyqtgraph.ptime as ptime
 import scipy.ndimage as ndimage
 from scipy import signal
 import glog
@@ -29,7 +28,7 @@ class StatsWidget(pg.GraphicsWidget, pg.GraphicsWidgetAnchor):
     pg.GraphicsWidget.__init__(self)
     pg.GraphicsWidgetAnchor.__init__(self)
     self.setFlag(self.ItemIgnoresTransformations)
-    self.layout = QtGui.QGraphicsGridLayout()
+    self.layout = qt_imports.QtWidgets.QGraphicsGridLayout()
     self.setLayout(self.layout)
     self.plot = plot
 

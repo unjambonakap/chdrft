@@ -6,12 +6,12 @@ import seaborn as sns
 import numpy as np
 kelly_colors_hex_c1 = [
     0xFFB300,  # Vivid Yellow
-    0x803E75,  # Strong Purple
     0xFF6800,  # Vivid Orange
     0xA6BDD7,  # Very Light Blue
     0xC10020,  # Vivid Red
     0xCEA262,  # Grayish Yellow
     0x817066,  # Medium Gray
+    0x803E75,  # Strong Purple
 ]
 
 kelly_colors_hex_c2 = [

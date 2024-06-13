@@ -12,7 +12,7 @@ import chdrft.utils.misc as cmisc
 import glog
 import numpy as np
 from chdrft.utils.types import *
-from pydantic import BaseModel, Field
+from pydantic.v1 import BaseModel, Field
 from typing import Tuple
 import xarray as xr
 from typing import Callable, List

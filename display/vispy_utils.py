@@ -706,9 +706,9 @@ def add_mesh_data_to_view(
 
     #print('PLOTTING ', points, points_size)
     if len(points) > 0:
-      scatter = Markers()
+      scatter = Markers(scaling=False)
       scatter.set_data(
-          points, edge_color=points_color, face_color=points_color, size=points_size, scaling=False
+          points, edge_color=points_color, face_color=points_color, size=points_size
       )
       scatter.transform = transform
       vb_points = Box.FromPoints(points[:, :2])

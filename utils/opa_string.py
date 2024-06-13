@@ -159,7 +159,7 @@ class FuzzyMatcher:
     if len(tb) >= 2:
       sc1 = tb[-1][0]
       sc2 = tb[-2][0]
-      bad = (sc2 / sc1 > 0.9)
+      bad = (sc2 / sc1 > 0.95)
       if sc1 < 1 - 1e-3:
         diff = (sc1 - sc2) / (1 - sc1)
         if diff > 1:

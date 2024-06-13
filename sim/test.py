@@ -14,7 +14,7 @@ from chdrft.utils.misc import Attributize as A
 import glog
 import chdrft.utils.Z as Z
 import numpy as np
-from pydantic import Field
+from pydantic.v1 import Field
 from chdrft.geo.satsim import gl
 
 global flags, cache

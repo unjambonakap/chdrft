@@ -23,7 +23,7 @@ from chdrft.utils.colors import ColorPool
 from chdrft.utils.misc import to_list, Attributize, proc_path
 import chdrft.utils.misc as cmisc
 from chdrft.utils.fmt import Format
-from pyqtgraph.Qt import QtGui, QtCore, USE_PYSIDE, USE_PYQT5
+from pyqtgraph.Qt import QtGui, QtCore
 from scipy import fftpack
 from scipy import optimize
 from scipy import signal
@@ -34,7 +34,6 @@ import math
 import numpy as np
 import pandas as pd
 import pyqtgraph as pg
-import pyqtgraph.ptime as ptime
 import scipy.ndimage as ndimage
 import sys
 import tempfile

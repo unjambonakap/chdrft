@@ -25,8 +25,8 @@ import shlex
 from chdrft.utils.types import is_num, is_list
 import tempfile
 from reprlib import recursive_repr
-from pydantic import BaseModel, Field, Extra
-import pydantic
+from pydantic.v1 import BaseModel, Field, Extra
+import pydantic.v1 as pydantic
 import pandas as pd
 from functools import cached_property
 import pickle
@@ -35,7 +35,7 @@ from typing import no_type_check
 from copy import deepcopy
 from chdrft.config.base import is_python2
 
-pydantic.BaseConfig.copy_on_model_validation = False
+pydantic.BaseConfig.copy_on_model_validation = 'none'
 
 
 def yield_wrapper(f):
@@ -677,7 +677,6 @@ class Attributize(dict):
         elem = OrderedDict(**rem)
     elem.update(_merge)
 
-    super().__init__()
     super().__init__(attributize_main=elem)
     object.__setattr__(self, '_key_norm', key_norm)
     object.__setattr__(self, '_elem', elem)
@@ -797,6 +796,8 @@ class Attributize(dict):
       raise AttributeError('Shit attribute %s' % name)
 
   def __setattr__(self, name, val):
+    if name == '__dict__':
+      raise AttributeError('not allowed, thinking about you jsonpickle')
     self.__setitem__(name, val)
 
   def __getitem__(self, name):
@@ -1860,7 +1861,6 @@ def define_json_handler(handler):
 for handler in handlers:
   define_json_handler(handler)
 
-jsonpickle.handlers.register(Attr, AttributizeHandler, base=True)
 
 try:
   import yaml
@@ -2002,6 +2002,8 @@ class PDTimestampHandler(jsonpickle.handlers.BaseHandler):
 
 
 PydanticHandler.handles(BaseModel)
+AttributizeHandler.handles(A)
+jsonpickle.handlers.register(A, AttributizeHandler, base=True)
 jsonpickle.handlers.register(BaseModel, PydanticHandler, base=True)
 jsonpickle.handlers.register(pd.Timestamp, PDTimestampHandler, base=True)
 jsonpickle.handlers.register(pd.Timedelta, PDTimestampHandler, base=True)

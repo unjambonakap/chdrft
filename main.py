@@ -7,6 +7,7 @@ import sys
 import os
 import shlex
 from chdrft.config.base import is_python2
+import chdrft.config.env
 import numpy as np
 import random
 
@@ -16,6 +17,7 @@ if not is_python2:
 
 
 class App:
+
   def __init__(self):
     self.flags = None
     self.stack = None
@@ -24,6 +26,8 @@ class App:
     self.cache = None
     if not is_python2:
       self.global_context = ExitStack()
+
+    chdrft.config.env.setup(self)
 
   def setup_jup(self, cmdline='', **kwargs):
     from chdrft.utils.misc import Attr
@@ -39,13 +43,12 @@ class App:
     f = inspect.currentframe().f_back
     if not force and self.setup: return
 
-    if not force and not f.f_globals['__name__']=='__main__': return
+    if not force and not f.f_globals['__name__'] == '__main__': return
     self.setup = True
 
     if 'main' not in f.f_globals and not force: return
     parser = None
-    parser = argparse.ArgumentParser(
-        formatter_class=argparse.ArgumentDefaultsHelpFormatter)
+    parser = argparse.ArgumentParser(formatter_class=argparse.ArgumentDefaultsHelpFormatter)
     parser.add_argument('--verbosity', type=str, default='ERROR')
     parser.add_argument('--pdb', action='store_true')
     parser.add_argument('--log_file', type=str)
@@ -59,12 +62,11 @@ class App:
     if 'args' in f.f_globals:
       args_func = f.f_globals['args']
       args_func(parser)
-    for x in parser_funcs: x(parser)
-
+    for x in parser_funcs:
+      x(parser)
 
     random.seed(0)
     np.random.seed(0)
-
 
     parser.add_argument('other_args', nargs=argparse.REMAINDER, default=['--'])
 
@@ -93,6 +95,7 @@ class App:
       self.stack.close()
 
     main_func = f.f_globals.get('main', None)
+
     def go():
       try:
         if is_python2:
@@ -114,12 +117,13 @@ class App:
       go()
       self.stack = None
 
-
   def run(self, stack, main_func):
     self.stack = stack
     stack.enter_context(self.global_context)
     script_name = sys.argv[0]
-    plog_filename='/tmp/opa_plog_{}_{}.log'.format(os.path.basename(script_name), self.flags.runid)
+    plog_filename = '/tmp/opa_plog_{}_{}.log'.format(
+        os.path.basename(script_name), self.flags.runid
+    )
 
     plog_file = open(plog_filename, 'w')
     stack.enter_context(plog_file)
@@ -128,6 +132,7 @@ class App:
     if self.cache:
       stack.enter_context(self.cache)
     if main_func is not None: main_func()
+
 
 app = App()
 

@@ -9,7 +9,7 @@ from chdrft.utils.misc import Attributize as A
 import glog
 import numpy as np
 from chdrft.utils.types import *
-from pydantic import Field
+from pydantic.v1 import Field
 from chdrft.utils.path import FileFormatHelper
 from chdrft.sim.rb.base import Vec3, Transform, Inertial, g_oph, np_array_like
 from enum import Enum

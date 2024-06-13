@@ -18,7 +18,7 @@ import sys
 import rx
 import rx.core
 import rx.subject
-from pydantic import Field
+from pydantic.v1 import Field
 from typing import ClassVar
 
 try:

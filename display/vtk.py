@@ -225,7 +225,7 @@ def vtk_main_obj(*args, **kwargs):
       self.text_actor.SetPosition((10, 10))
 
     def ButtonEvent(self, obj, event):
-      m = re.match('(?P<button>\w+)Button(?P<action>Press|Release)Event', event)
+      m = re.match(r'(?P<button>\w+)Button(?P<action>Press|Release)Event', event)
 
       nstatus = m['action'] == 'Press'
       button = m['button']

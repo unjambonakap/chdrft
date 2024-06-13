@@ -1,31 +1,34 @@
 #!/usr/bin/env python
 
+from PyQt5 import QtCore
 import os
 import chdrft.utils.misc as cmisc
 import jax
-from chdrft.main import app
 import tempfile
 import numpy as np
 import random
 
-
-np.random.seed(0)
-random.seed(0)
-np.set_printoptions(edgeitems=10, linewidth=180)
-np.set_printoptions(formatter={'int_kind': '{:},'.format, 'float_kind': '{:.07f},'.format})
-
 g_pyqt4 = 'pyqt4'
 g_pyqt5 = 'pyqt5'
 g_environ_pyqt = 'QT_API'
-os.environ['SAGE_LOCAL'] = '/usr'
-jax_dump_dir = app.global_context.enter_context(tempfile.TemporaryDirectory())
 
 
-os.environ["XLA_FLAGS"] = f'--xla_force_host_platform_device_count=16 --xla_embed_ir_in_executable --xla_dump_to={jax_dump_dir}'
+def setup(app):
+  np.random.seed(0)
+  random.seed(0)
+  os.environ['SAGE_LOCAL'] = '/usr'
+  np.set_printoptions(edgeitems=10, linewidth=280)
+  np.set_printoptions(formatter={'int_kind': '{:},'.format, 'float_kind': '{:.07f},'.format})
 
-import jax
-from jax.config import config
-config.update("jax_enable_x64", False)
+  jax_dump_dir = app.global_context.enter_context(tempfile.TemporaryDirectory())
+
+  os.environ[
+      "XLA_FLAGS"
+  ] = f'--xla_force_host_platform_device_count=16 --xla_embed_ir_in_executable --xla_dump_to={jax_dump_dir}'
+
+  import jax
+  jax.config.update("jax_enable_x64", False)
+
 
 class Env:
 
@@ -50,25 +53,30 @@ class Env:
       self.get_qt_imports()
       self.loaded = 1
 
+
+  def run_magic(self, force=False):
+    if not self.ran_magic and (cmisc.is_interactive() or force):
+      self.ran_magic = 1
+      magic_name = ['qt4', 'qt5'][self.qt5]
+      print('Runnign magic', magic_name)
+      try:
+        get_ipython().run_line_magic('gui', magic_name)
+      except:
+        pass
+      print('done')
+
   def get_qt_imports(self):
-    import vispy.app
-    vispy.app.use_app(self.vispy_app)
 
     if self.qt5:
-      magic_name = 'qt5'
       from PyQt5 import QtGui, QtCore, QtWidgets, QtTest
       QWidget, QApplication = QtWidgets.QWidget, QtWidgets.QApplication  # Compat
     else:
-      magic_name = 'qt4'
       from PyQt4 import QtGui, QtCore, QtTest
       QWidget, QApplication = QtGui.QWidget, QtGui.QApplication
+    import vispy.app
+    vispy.app.use_app(self.vispy_app)
 
-    if not self.ran_magic and cmisc.is_interactive():
-      self.ran_magic = 1
-      print('Runnign magic', magic_name)
-      try: get_ipython().run_line_magic('gui', magic_name)
-      except:pass
-      print('done')
+    self.run_magic()
 
     return cmisc.Attr(
         QWidget=QWidget,
@@ -92,7 +100,8 @@ g_env = Env()
 qt_imports = g_env.get_qt_imports_lazy()
 
 
-def init_jupyter(run_app=False):
+def init_jupyter(run_app=False, run_magic=True):
+  if run_magic: g_env.run_magic(force=True)
   from IPython.core.display import display, HTML
   display(HTML("<style>.container { width:90% !important; }</style>"))
   from chdrft.main import app
@@ -126,6 +135,6 @@ def init_jupyter(run_app=False):
       functools=Z.functools,
       pd=pd,
       oplt=K.g_plot_service,
-    g_env=g_env,
-    qt_imports=qt_imports,
+      g_env=g_env,
+      qt_imports=qt_imports,
   )

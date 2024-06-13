@@ -13,7 +13,7 @@ from chdrft.utils.types import *
 from chdrft.external.gamepad.controllers import Xbox360
 import chdrft.external.gamepad.gamepad as gamepad
 from chdrft.utils.rx_helpers import ImageIO
-from pydantic import Field
+from pydantic.v1 import Field
 from chdrft.utils.path import FileFormatHelper
 from chdrft.dsp.utils import linearize_clamp
 from typing import Callable

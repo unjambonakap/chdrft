@@ -4,7 +4,6 @@ import os
 import time
 import threading
 import subprocess as sp
-from IPython.utils.frame import extract_module_locals
 from chdrft.cmds import CmdsList
 from chdrft.main import app
 from chdrft.utils.cmdify import ActionHandler
@@ -78,6 +77,7 @@ def create_kernel(runid=None, do_run_notebook=False, in_thread=False, blender=Fa
   par_globals = dict(par_globals)
   par_globals.update(par_locals)
 
+  from IPython.utils.frame import extract_module_locals
   user_module, _ = extract_module_locals(1)
   user_ns = par_globals
 

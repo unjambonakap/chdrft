@@ -105,7 +105,7 @@ class PlotService:
     if entry is None: entry = vh.FigWidget()
     return A(w=entry)
 
-  def plot_graph(self, obj, entry=None, gwh=None, **kwargs):
+  def plot_graph(self, obj, entry:OpaPlot | None=None, gwh=None, **kwargs):
     if entry is None: entry = OpaPlot(**kwargs)
     data = entry.add_plot(obj, **kwargs)
     return A(w=entry, data=data)

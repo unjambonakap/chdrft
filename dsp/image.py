@@ -1,9 +1,11 @@
 #!/usr/bin/env python
 
+from __future__ import annotations
+
 from IPython.utils.frame import extract_module_locals
 from asq.initiators import query as asq_query
 from enum import Enum
-from pyqtgraph.Qt import QtGui, QtCore, USE_PYSIDE, USE_PYQT5
+from pyqtgraph.Qt import QtGui, QtCore
 from rx import operators as ops
 from scipy import signal
 from scipy.stats.mstats import mquantiles
@@ -17,7 +19,6 @@ import numpy as np
 import numpy as np
 import pandas as pd
 import pyqtgraph as pg
-import pyqtgraph.ptime as ptime
 import scipy.ndimage as ndimage
 import sys
 import tempfile
@@ -84,7 +85,9 @@ def shift_image(im, offset):
   if dx <= 0: im = im[:, -dx:]
   else: im = im[:, :-dx]
 
-  if dy <= 0: im = im[-dy:,]
+  if dy <= 0: im = im[
+      -dy:,
+  ]
   else: im = im[:-dy, :]
   return im
 
@@ -102,32 +105,37 @@ def plot_img(img):
   G.run()
 
 
-def norm_img(img):
+def from_cv_norm_img(img):
+  img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
   if np.max(img) > 1.1:
     img = img / 255.
+  return img.astype(np.float32)
+
+
+def to_cv_norm_img(img):
+  img = cv2.cvtColor(img, cv2.COLOR_RGB2BGR)
+  if img.dtype in (np.float64, np.float32):
+    img = (img * 255).astype(np.uint8)
   return img
 
-
-def to_uint8_image(res):
-  if res.dtype == np.float64:
-    res = (res * 255).astype(np.uint8)
-  return res
-
-
 def save_image(fname, res):
-  cv2.imwrite(fname, to_uint8_image(res))
+  cv2.imwrite(fname, to_cv_norm_img(res))
 
 
 def read_tiff(fname):
-  res = cv2.imread(fname, 0)
+  res = cv2.imread(fname, cv2.IMREAD_UNCHANGED)
   assert res is not None, fname
-  return norm_img(res)
+  return from_cv_norm_img(res)
 
 
 class ImageData(cmisc.Attr):
 
   @staticmethod
-  def Make(data):
+  def Make(data, **kwargs):
+    if isinstance(data, str):
+      return ImageData(img=read_tiff(data), **kwargs)
+    if isinstance(data, np.ndarray) and len(data.shape) == 1:
+      return ImageData(img=from_cv_norm_img(cv2.imdecode(data,cv2.IMREAD_UNCHANGED)), **kwargs)
     if isinstance(data, ImageData):
       return data.clone()
     if isinstance(data, dict):
@@ -183,6 +191,23 @@ class ImageData(cmisc.Attr):
     self.set_image(img)
     self._obj = _obj
 
+  @property
+  def channels(self) -> int:
+    if len(self.img.shape) == 2: return 1
+    return self.img.shape[2]
+
+  def set_pix(self, pos_xy, v: float, channel: int = None):
+    if self.yx: pos_xy = pos_xy[::-1]
+    if len(self.img.shape) == 2 or channel is None:
+      assert channel == 0 or channel is None
+      self.img[tuple(pos_xy)] = v
+    else:
+      self.img[(
+          pos_xy[0],
+          pos_xy[1],
+          channel,
+      )] = v
+
   def configure_box(self, box):
     self.pos = box.low
     self.box = box
@@ -212,6 +237,12 @@ class ImageData(cmisc.Attr):
     else:
       self.img_box = None
       self.u2px = None
+
+  def save(self, fname):
+    save_image(fname, self.img)
+
+  def encode(self):
+    return cv2.imencode('.png', cv2.cvtColor(to_cv_norm_img(self.img), cv2.COLOR_RGB2BGR), [cv2.IMWRITE_PNG_COMPRESSION, 0])[1]
 
   def get_at(self, p):
     pos = self.img_box.clampv(self.img_box.from_box_space(p))
@@ -258,6 +289,9 @@ class ImageData(cmisc.Attr):
 
   def __hash__(self):
     return hash(tuple(self.gridpos))
+
+  def subimg_id(self, region) -> ImageData:
+    return ImageData(img=self.subimg(region))
 
   def subimg(self, region, v=None):
     region_pix = self.box.change_rect_space(self.img_box,

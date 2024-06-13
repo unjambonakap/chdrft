@@ -10,7 +10,7 @@ from chdrft.utils.misc import Attributize as A
 import glog
 import numpy as np
 from chdrft.utils.types import *
-from pydantic import Field
+from pydantic.v1 import Field
 from chdrft.utils.path import FileFormatHelper
 from chdrft.utils.fmt import Format
 from chdrft.sim.rb.rb_gen import SimulHelper, ControlInputState, ControlParameters, ControlSpec, Simulator, NumpyPacker

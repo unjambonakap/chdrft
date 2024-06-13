@@ -8,13 +8,14 @@ from chdrft.utils.misc import Attributize as A
 import glog
 import numpy as np
 from chdrft.utils.types import *
-from pydantic import Field
+from pydantic.v1 import Field
 from chdrft.utils.path import FileFormatHelper
 import sage
 from sage.all import var
 import sage.all
 from chdrft.sim.rb.base import Vec3, Transform, R
 from astropy import constants as const
+import pandas as pd
 
 global flags, cache
 flags = None
@@ -160,15 +161,27 @@ class TGOSnapshot(cmisc.PatchedModel):
     return Vec3(df(t - self.t0))
 
 
+def vec2d2pandas(vec, name):
+
+  names = [f'{name}_{i}'  for i in range(vec.shape[1])]
+  return pd.DataFrame(vec, columns=names)
+
 def analyze_tgo(sx: TGOSolver, p0: Vec3, v0: Vec3, t_tgo: float, gspec: GravitySpec):
   tt = np.linspace(0, t_tgo)
   a = sx.dpfunc(p0.vdata, v0.vdata, t_tgo, 0)(tt).T
+  v = sx.dpfunc(p0.vdata, v0.vdata, t_tgo, 1)(tt).T
   p = sx.dpfunc(p0.vdata, v0.vdata, t_tgo, 2)(tt).T
   a = a - gspec(p)
   anorm = a / np.linalg.norm(a, axis=1, keepdims=True)
   dot = np.sum(anorm[1:] * anorm[:-1], axis=1)
   ang = np.arccos(np.clip(dot, -1, 1))
-  return A(a=a, ang=ang)
+  dot_p0 = a @ p0.uvec.vdata
+  df = pd.DataFrame.from_dict(dict(t=tt, ap0=dot_p0))
+  df = df.join(vec2d2pandas(a, name='a'))
+  df = df.join(vec2d2pandas(p, name='p'))
+  df = df.join(vec2d2pandas(v, name='v'))
+
+  return A(a=a, ang=ang, p=p, v=v, df=df)
 
 
 def test(ctx):

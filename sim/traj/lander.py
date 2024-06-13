@@ -9,7 +9,7 @@ from chdrft.utils.misc import Attributize as A
 import glog
 import numpy as np
 from chdrft.utils.types import *
-from pydantic import Field
+from pydantic.v1 import Field
 from chdrft.utils.path import FileFormatHelper
 
 from chdrft.sim.rb import rb_gen
@@ -79,6 +79,8 @@ class LanderController(cmisc.PatchedModel):
   step_sec: float
   pidz_params: PIDZParameters
   local_thrust_dir: Vec3
+  target_normal: Vec3 = None
+  threshold_final_mode: float = None
 
   @cmisc.cached_property
   def z2thrust(self) -> Transform:
@@ -88,7 +90,19 @@ class LanderController(cmisc.PatchedModel):
     self.state = None
 
   def process(self, t: float, p: Transform, dp: Vec3, gravity: Vec3) -> Vec3:
-    if self.state is None or t - self.state.snapshot.t0 > self.refresh_t_seconds:
+    final_mode = False
+    if self.threshold_final_mode is not None:
+      pe = Vec3.Pt(self.tgo.dkp_end[0])
+      dist = (p.pos_v - pe).proj(self.target_normal).norm
+      print('DIST ', dist)
+      if dist < self.threshold_final_mode:
+        print('activate proj')
+        final_mode = True
+        p = Transform.From(rot=p.rot, pos=pe + (p.pos_v - pe).proj(self.target_normal))
+        dp = dp.proj(self.target_normal)
+
+    if final_mode or self.state is None or t - self.state.snapshot.t0 > self.refresh_t_seconds:
+      print('Reset state')
       self.state = LanderControllerTGOState(
           snapshot=tgo.TGOSnapshot(tgo=self.tgo, p=p.pos_v, dp=dp, tgo_t0=self.t_tgo - t, t0=t),
           ctrl=PIDZController(
@@ -98,6 +112,10 @@ class LanderController(cmisc.PatchedModel):
     want = self.state.snapshot.get_p(t)
     target_acc = want - gravity
     target_norm = target_acc.norm
+    world_thrust = p @ self.z2thrust @ Vec3.Z()
+    print('TARGET >> ', target_acc, target_norm, world_thrust)
+    if target_acc.dot(world_thrust) < 0: 
+      target_norm = 0
     self.state.ctrl.target_z = target_acc.uvec
     action = self.state.ctrl.proc(p @ self.z2thrust)
     res = action * target_norm * self.mass

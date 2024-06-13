@@ -4,7 +4,7 @@
 from IPython.utils.frame import extract_module_locals
 from asq.initiators import query as asq_query
 from enum import Enum
-from pyqtgraph.Qt import QtGui, QtCore, USE_PYSIDE, USE_PYQT5
+from pyqtgraph.Qt import QtGui, QtCore
 from rx import operators as ops
 from scipy import signal
 from scipy.stats.mstats import mquantiles
@@ -18,7 +18,6 @@ import numpy as np
 import numpy as np
 import pandas as pd
 import pyqtgraph as pg
-import pyqtgraph.ptime as ptime
 import scipy.ndimage as ndimage
 import sys
 import tempfile
