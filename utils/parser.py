@@ -5,8 +5,6 @@ from chdrft.main import app
 from chdrft.utils.cmdify import ActionHandler
 from chdrft.utils.misc import Attributize
 from chdrft.emu.base import NonRandomMemory
-import glog
-import struct
 
 global flags, cache
 flags = None

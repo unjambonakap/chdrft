@@ -1,3 +1,4 @@
+from __future__ import annotations
 import sys
 import glog
 import bisect
@@ -7,17 +8,16 @@ from copy import copy
 
 from chdrft.utils.misc import to_list, Attributize, proc_path
 import chdrft.utils.misc as cmisc
-from sortedcontainers import SortedSet
 import math
 import io
 import itertools
 import functools
 from shapely.geometry import Polygon, LineString, Point
 from shapely.geometry.base import BaseGeometry
-from chdrft.utils.math import MatHelper
-from chdrft.utils.types import *
+from chdrft.utils.omath import MatHelper
+from chdrft.utils.opa_types import *
 from chdrft.utils.geo import Line
-import chdrft.utils.math as opa_math
+import chdrft.utils.omath as opa_math
 
 g_eps = 1e-7
 kInfInt = 2**100
@@ -420,15 +420,15 @@ class Range2D:
   high: np.ndarray
 
   @staticmethod
-  def All(is_int=0):
+  def All(is_int=0) -> Range2D:
     return Range2D(Range1D.All(is_int=is_int), Range1D.All(is_int=is_int))
 
   @staticmethod
-  def Empty(is_int=0):
+  def Empty(is_int=0) -> Range2D:
     return Range2D(Range1D.Empty(is_int=is_int), Range1D.Empty(is_int=is_int))
 
   @staticmethod
-  def FromShapely(geo):
+  def FromShapely(geo) -> Range2D:
     mx, my, Mx, My = geo.bounds
     return Range2D(xr=(mx, Mx), yr=(my, My))
 
@@ -1230,6 +1230,7 @@ class Intervals:
       merge_dist=1,
       is_int=1,
   ):
+    from sortedcontainers import SortedSet
     self.xl = SortedSet()
     self.use_range_data = use_range_data
     self.merge = merge

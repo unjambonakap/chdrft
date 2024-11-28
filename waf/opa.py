@@ -684,8 +684,8 @@ class ClOpaWaf:
 
     self.conf_configure = True
     if ctx.options.build == WafBuildType.RELEASE:
-      ctx.env.append_value('CXXFLAGS', ['-O3'])
-      ctx.env.append_value('CFLAGS', ['-O3'])
+      ctx.env.append_value('CXXFLAGS', ['-O3', '-march=native'])
+      ctx.env.append_value('CFLAGS', ['-O3', '-march=native'])
     else:
       ctx.env.append_value('CXXFLAGS', ['-O0', '-g'])
       ctx.env.append_value('CFLAGS', ['-O0', '-g'])

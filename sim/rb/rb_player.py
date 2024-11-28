@@ -1,37 +1,19 @@
 #!/usr/bin/env python
 
-from typing import Tuple, Optional
-from dataclasses import dataclass
 from chdrft.cmds import CmdsList
 from chdrft.main import app
 from chdrft.utils.cmdify import ActionHandler
 from chdrft.utils.misc import Attributize as A
 import chdrft.utils.misc as cmisc
-import glog
 import numpy as np
-from chdrft.utils.types import *
-from pydantic.v1 import BaseModel, Field
-from typing import Tuple, Callable
-import xarray as xr
-from typing import Callable, List
-from scipy.spatial.transform import Rotation as R
-from chdrft.display.base import TriangleActorBase
-from chdrft.utils.math import MatHelper
-import itertools
+from chdrft.utils.opa_types import *
+from typing import Callable
+from typing import Callable
 from enum import Enum
-import functools
-import sympy as sp
-import jax.numpy as jnp
-import jaxlib
-import jax
-import pygmo as pg
-from chdrft.utils.fmt import Format
-from chdrft.utils.path import FileFormatHelper
 from typing import Callable
 from chdrft.sim.rb.rb_gen import *
 from chdrft.inputs.controller import OGamepad, SceneControllerInput, InputControllerParameters, GamepadButtons
-from chdrft.utils.rx_helpers import ImageIO, rx, pipe_connect
-from pydantic.v1 import Field
+from chdrft.utils.rx_helpers import ImageIO, pipe_connect
 from chdrft.display.ui import TimerHelper
 
 global flags, cache

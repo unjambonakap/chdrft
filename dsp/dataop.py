@@ -4,26 +4,16 @@ from chdrft.cmds import CmdsList
 from chdrft.main import app
 from chdrft.utils.cmdify import ActionHandler
 from chdrft.utils.misc import Attributize
-from chdrft.utils.misc import Attributize as A
-import chdrft.utils.misc as cmisc
 import glog
-import math, sys, os
+import math
 import numpy as np
-from chdrft.utils.types import *
-from enum import Enum
-from chdrft.utils.path import FileFormatHelper
+from chdrft.utils.opa_types import *
 from chdrft.utils.fmt import Format
-import chdrft.display.base
-from IPython.utils.frame import extract_module_locals
 from chdrft.utils.swig import swig
-from asq.initiators import query as asq_query
 from chdrft.dsp.opa_gnuradio import GnuRadioFile
-from chdrft.struct.base import Range1D, Range2D, Intervals, ListTools, Box
-from chdrft.utils.colors import ColorPool
-from chdrft.utils.misc import to_list, Attributize, proc_path
-import chdrft.utils.misc as cmisc
+from chdrft.struct.base import Range1D, Intervals, ListTools
+from chdrft.utils.misc import Attributize
 from chdrft.utils.fmt import Format
-from pyqtgraph.Qt import QtGui, QtCore
 from scipy import fftpack
 from scipy import optimize
 from scipy import signal
@@ -32,17 +22,10 @@ from scipy import stats
 import glog
 import math
 import numpy as np
-import pandas as pd
-import pyqtgraph as pg
-import scipy.ndimage as ndimage
-import sys
 import tempfile
-from scipy.stats.mstats import mquantiles
-import itertools
 from chdrft.cmds import CmdsList
 from chdrft.main import app
 from chdrft.utils.cmdify import ActionHandler
-import cv2
 
 global flags, cache
 flags = None

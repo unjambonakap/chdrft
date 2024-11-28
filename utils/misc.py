@@ -5,11 +5,9 @@ import binascii
 import hashlib
 import inspect
 import inspect
-import json
 import os
 import re
 import struct
-import threading
 import traceback as tb
 import pprint as pp
 import sys
@@ -19,24 +17,43 @@ import csv
 import fnmatch
 import glob
 import numpy as np
-import copy
 import functools
 import shlex
-from chdrft.utils.types import is_num, is_list
-import tempfile
+from chdrft.utils.opa_types import is_num, is_list
 from reprlib import recursive_repr
-from pydantic.v1 import BaseModel, Field, Extra
-import pydantic.v1 as pydantic
+from pydantic import BaseModel, Extra, Field
+import pydantic as pydantic
 import pandas as pd
 from functools import cached_property
-import pickle
+import shapely, shapely.geometry, shapely.geometry.base
+import itertools
+from contextlib import ExitStack
+import enum
 
 from typing import no_type_check
 from copy import deepcopy
 from chdrft.config.base import is_python2
+from typing import TYPE_CHECKING
+
+# trick PyRight into thinking that it might be both False or True
+RUNTIME = not TYPE_CHECKING
+
+if RUNTIME:
+    def base_model(model):
+        return model
+else:
+    from dataclasses import dataclass as base_model
 
 pydantic.BaseConfig.copy_on_model_validation = 'none'
+def pyd_f(func):
+  return Field(default_factory=func)
 
+def call_sync_or_async(f, *args, **kwargs):
+  import asyncio
+  if asyncio.iscoroutinefunction(f):
+    el = asyncio.get_event_loop()
+    return el.run_until_complete(f(*args, **kwargs))
+  return f(*args, **kwargs)
 
 def yield_wrapper(f):
 
@@ -131,6 +148,16 @@ def to_numpy_args(*args):
     yield to_numpy(arg)
 
 
+class ExitStackWithPush(ExitStack):
+
+  def __init__(self):
+    super().__init__()
+    self.pushs = []
+
+  def __enter__(self):
+    super().__enter__()
+    [self.enter_context(x) for x in self.pushs]
+
 class List:
 
   @staticmethod
@@ -168,7 +195,6 @@ def cl_norm_decorator(normf):
 
 
 try:
-  from enum import Enum
   from contextlib import ExitStack
   import ctypes
   from asq.initiators import query as asq_query
@@ -185,6 +211,9 @@ devnull = open(os.devnull, 'r')
 def identity(x):
   return x
 
+def nop_func(*args, **kwargs):
+  pass
+
 
 def none_func():
   return None
@@ -198,7 +227,6 @@ def dict_func():
   return dict
 
 
-import itertools
 try:
   from progressbar import ProgressBar
 except:
@@ -212,7 +240,7 @@ if is_python2:
 misc_backend = None
 chdrft_executor = None
 try:
-  from concurrent.futures import ThreadPoolExecutor, as_completed, Future
+  from concurrent.futures import ThreadPoolExecutor, as_completed
 
   class CustomExecutor(ThreadPoolExecutor):
 
@@ -237,7 +265,7 @@ if sys.version_info >= (3, 0):
   import jsonpickle
   from jsonpickle import handlers
   misc_backend = jsonpickle.backend.JSONBackend()
-  misc_backend.set_encoder_options('json', sort_keys=True, indent=4)
+  misc_backend.set_encoder_options('json', sort_keys=True, indent=2)
   misc_backend.set_preferred_backend('json')
 
   class BinaryHandler(jsonpickle.handlers.BaseHandler):
@@ -253,6 +281,10 @@ if sys.version_info >= (3, 0):
 
   #import jsonpickle.ext.numpy as jsonpickle_numpy
   #jsonpickle_numpy.register_handlers()
+
+  def json_flatten(obj, **kwargs):
+    return jsonpickle.Pickler(backend=misc_backend, unpicklable=0, **kwargs).flatten(obj)
+
   def json_dumps(*args, default=None, **kwargs):
     return jsonpickle.dumps(*args, backend=misc_backend, unpicklable=0, **kwargs)
 
@@ -512,7 +544,6 @@ def cwdpath_abs(path):
 
 def add_to_n_globals(n, **kwargs):
   _, globs = get_n2_locals_and_globals(n + 1)
-  print('abc' in globs)
   globs.update(kwargs)
 
 
@@ -849,8 +880,11 @@ class Attributize(dict):
   #      del tmp[k]
   #  return repr(tmp)
 
-  def to_yaml(self):
+  def to_yaml(self) -> str:
     return yaml.dump(dict(self._elem), default_flow_style=False)
+
+  def to_json(self) -> str:
+    return json_dumps(self)
 
   def _str_oneline(self):
     return str(self)
@@ -908,7 +942,7 @@ class Attributize(dict):
 
   @staticmethod
   def FromYaml(s, **params):
-    res = yaml.load(s)
+    res = yaml_load_custom(s)
     return Attributize.RecursiveImport(res, **params)
 
   @staticmethod
@@ -1106,7 +1140,7 @@ class PatternMatcher:
     if isinstance(pattern, PatternMatcher):
       return pattern(s)
 
-    m = re.match('(?P<typ>\w+):(?P<arg>.*)', pattern)
+    m = re.match(r'(?P<typ>\w+):(?P<arg>.*)', pattern)
     if not m:
       return PatternMatcher.fromstr(pattern)
     else:
@@ -1519,7 +1553,7 @@ def list_files_rec(base, *paths):
   for path_entry in paths:
     for root, dirs, files in os.walk(os.path.join(base, path_entry)):
       for f in files:
-        lst.append(os.path.join(root, f))
+        lst.append(os.path.normpath(os.path.join(root, f)))
   return asq_query(lst)
 
 
@@ -1533,14 +1567,10 @@ def filter_glob_list(lst, globs, blacklist_default=True, key=lambda x: x, blackl
       continue
     kk = key(entry)
 
-    for pattern in globs:
-      if fnmatch.fnmatch(kk, pattern):
-        if not blacklist:
-          yield entry
-        break
-      else:
-        if blacklist:
-          yield entry
+    matches = any([fnmatch.fnmatch(kk, pattern) for pattern in globs])
+    if bool(blacklist) != matches:
+      yield entry
+
 
 
 def whitelist_blacklist_filter(lst, whitelist, blacklist, ikey=lambda x: x[1]):
@@ -1598,6 +1628,7 @@ class KeyedCGen:
 
 def get_input(globs):
   res = set()
+  if isinstance(globs, str): globs = [globs]
   for pattern in globs:
     res.update(glob.glob(pattern))
 
@@ -1634,7 +1665,7 @@ Ops = Attributize(
 
 if sys.version_info >= (3, 0):
 
-  class Arch(Enum):
+  class Arch(enum.Enum):
     x86 = 'x86'
     x86_16 = 'x86_16'
     x86_64 = 'x86_64'
@@ -1900,7 +1931,6 @@ try:
 except Exception as e:
   print('FUU ', e)
   glog.error(e)
-  pass
 
 
 class cached_classproperty(object):
@@ -1926,15 +1956,26 @@ class cached_classproperty(object):
 def make_class_kwargs(cl, kwargs):
   return cl(**kwargs)
 
+@base_model
 class PatchedModel(
     BaseModel,
+    #json_dumps=json_dumps,
+    #json_loads=json_loads,
+):
+  model_config = pydantic.ConfigDict(
+    population_by_name=True,
     extra=Extra.forbid,
     arbitrary_types_allowed=True,
-    keep_untouched=(cached_property, cached_classproperty),
-    json_dumps=json_dumps,
-    json_loads=json_loads,
-    allow_population_by_field_name=True,
-):
+    ignored_types=(cached_property, cached_classproperty),
+  )
+
+
+  def model_post_init(self, ctx):
+    super().model_post_init(ctx)
+    self.__post_init__()
+
+  def __post_init__(self):
+    pass
 
   def json(self):
     return json_dumps(self)
@@ -1983,6 +2024,8 @@ class PatchedModel(
           object.__setattr__(self, name, value)
           break
       else:
+        if name == '__dict__':
+          raise AttributeError('Wtf jsonpickle')
         raise e
 
 
@@ -1994,17 +2037,41 @@ class PydanticHandler(jsonpickle.handlers.BaseHandler):
   def restore(self, obj):
     assert 0
 
+class ShapelyHandler(jsonpickle.handlers.BaseHandler):
+
+  def flatten(self, obj, data):
+    return self.context.flatten(json_loads(shapely.to_geojson(obj)))
+
+  def restore(self, obj):
+    assert 0
+
 
 class PDTimestampHandler(jsonpickle.handlers.BaseHandler):
 
   def flatten(self, obj, data):
     return self.context.flatten(str(obj))
 
+class EnumHandler(jsonpickle.handlers.BaseHandler):
+
+  def flatten(self, obj, data):
+    return obj.value
+
+  def restore(self, obj):
+    assert 0
+
 
 PydanticHandler.handles(BaseModel)
 AttributizeHandler.handles(A)
+jsonpickle.handlers.register(shapely.geometry.base.BaseGeometry, ShapelyHandler, base=True)
 jsonpickle.handlers.register(A, AttributizeHandler, base=True)
 jsonpickle.handlers.register(BaseModel, PydanticHandler, base=True)
 jsonpickle.handlers.register(pd.Timestamp, PDTimestampHandler, base=True)
 jsonpickle.handlers.register(pd.Timedelta, PDTimestampHandler, base=True)
 PDTimestampHandler.handles(pd.Timedelta)
+jsonpickle.register(enum.Enum, EnumHandler, base=True)
+
+def return_to_ipython():
+  locs,_ = get_n2_locals_and_globals(n=0)
+  from IPython.terminal import interactiveshell
+  interactiveshell.TerminalInteractiveShell.instance().user_global_ns.update(locs)
+  assert 0

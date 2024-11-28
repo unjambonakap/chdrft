@@ -86,6 +86,12 @@ class Tube(ExitStack):
 
       self.buf += res
 
+
+  def take_current(self):
+    res = self.buf
+    self.buf = b''
+    return res
+
   def recv_fixed_size(self, size, timeout=None):
     return self.recv_until(lambda x: -1 if len(x) < size else size, timeout)
 
@@ -198,16 +204,18 @@ class Tube(ExitStack):
 
   def __enter__(self):
     super().__enter__()
-    if self.logfile:
-      self.logfile_obj = open(self.logfile, 'wb')
-      self.enter_context(self.logfile_obj)
-    self.start()
+    try:
+      if self.logfile:
+        self.logfile_obj = open(self.logfile, 'wb')
+        self.enter_context(self.logfile_obj)
+      self.start()
+      self.callback(self.shutdown)
+    except:
+        if self.__exit__(*sys.exc_info()):
+            pass
+        else:
+            raise
     return self
-
-  def __exit__(self, typ, value, tb):
-    glog.info('Exit tube')
-    self.shutdown()
-    super().__exit__(typ, value, tb)
 
   def shutdown(self):
     if self.running == False:

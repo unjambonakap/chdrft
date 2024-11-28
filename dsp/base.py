@@ -14,7 +14,6 @@ from chdrft.display.ui import GraphHelper
 from chdrft.algo.viterbi import ConvViterbi, ConvEnc
 import chdrft.algo.viterbi as viterbi
 from chdrft.utils.swig import swig
-import math
 from gnuradio import digital
 
 digital.pfb_clock_sync_ccf

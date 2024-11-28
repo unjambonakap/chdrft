@@ -1,37 +1,23 @@
 #!/usr/bin/env python
 
 import typing
-from typing import Tuple, Optional
-from dataclasses import dataclass
+from typing import Optional
 from chdrft.cmds import CmdsList
-from chdrft.main import app
 from chdrft.utils.cmdify import ActionHandler
 from chdrft.utils.misc import Attributize as A
 from chdrft.utils.cache import Cachable
 import chdrft.utils.misc as cmisc
 import glog
 import numpy as np
-from chdrft.utils.types import *
-from pydantic.v1 import BaseModel, Field
-from typing import Tuple
-import xarray as xr
-from typing import Callable, List
-from scipy.spatial.transform import Rotation as R
-from chdrft.display.base import TriangleActorBase
-from chdrft.utils.math import MatHelper
-import itertools
+from chdrft.utils.opa_types import *
+from pydantic.v1 import Field
+from typing import Callable
 from enum import Enum
 import functools
-import sympy as sp
 import jax.numpy as jnp
-import jaxlib
 import jax
-import pygmo as pg
-from chdrft.utils.fmt import Format
-from chdrft.utils.path import FileFormatHelper
 from chdrft.sim.rb.base import *
-from chdrft.sim.spatial_vectors import SpatialVector, Transform_SV, TransformKind
-from chdrft.math.manifold import unit_vec
+from chdrft.sim.spatial_vectors import SpatialVector, Transform_SV
 
 global flags, cache
 flags = None
@@ -97,8 +83,8 @@ linktype2data = {
 
 class LinkSpec(cmisc.PatchedModel):
   type: RigidBodyLinkType
-  wr: Transform = Field(default_factory=Transform.From)
-  rl: Transform = Field(default_factory=Transform.From)
+  wr: Transform = cmisc.pyd_f(Transform.From)
+  rl: Transform = cmisc.pyd_f(Transform.From)
 
   def is_rigid(self) -> bool:
     return self.type is RigidBodyLinkType.RIGID
@@ -390,7 +376,7 @@ class LinkData(cmisc.PatchedModel):
 
 
 class RigidBodyLink(cmisc.PatchedModel):
-  link_data: LinkData = Field(default_factory=LinkData)
+  link_data: LinkData = cmisc.pyd_f(LinkData)
   rb: "RigidBody"
 
   parent: "Optional[RigidBodyLink]" = Field(repr=False, default=None)
@@ -516,10 +502,10 @@ class RBData(cmisc.PatchedModel):
 
 
 class RigidBody(cmisc.PatchedModel):
-  spec: SolidSpec = Field(default_factory=SolidSpec)
-  data: RBData = Field(default_factory=RBData)
+  spec: SolidSpec = cmisc.pyd_f(SolidSpec)
+  data: RBData = cmisc.pyd_f(RBData)
   self_link: Optional[RigidBodyLink] = Field(repr=False, default=None)
-  move_links: list[RigidBodyLink] = Field(default_factory=list)
+  move_links: list[RigidBodyLink] = cmisc.pyd_f(list)
 
   ctx: "SceneContext" = Field(repr=False)
 
@@ -627,8 +613,8 @@ class SlicedNumpyArrayEntry(cmisc.PatchedModel):
 
 class SliceNumpyArrayDesc(cmisc.PatchedModel):
 
-  tb: list[SlicedNumpyArrayEntry] = Field(default_factory=list)
-  mp: dict[object, SlicedNumpyArrayEntry] = Field(default_factory=dict)
+  tb: list[SlicedNumpyArrayEntry] = cmisc.pyd_f(list)
+  mp: dict[object, SlicedNumpyArrayEntry] = cmisc.pyd_f(dict)
   pos: int = 0
   dim: int
 
@@ -691,9 +677,9 @@ class RBSystemSpec(cmisc.PatchedModel):
   f_desc: SliceNumpyArrayDesc
   f_full_desc: SliceNumpyArrayDesc
 
-  state_packer: NumpyPacker = Field(default_factory=NumpyPacker)
-  d_packer: NumpyPacker = Field(default_factory=NumpyPacker)
-  ctrl_packer: NumpyPacker = Field(default_factory=NumpyPacker)
+  state_packer: NumpyPacker = cmisc.pyd_f(NumpyPacker)
+  d_packer: NumpyPacker = cmisc.pyd_f(NumpyPacker)
+  ctrl_packer: NumpyPacker = cmisc.pyd_f(NumpyPacker)
   name2rbl: dict[str, RigidBodyLink]
 
   def load_state(self, root: RigidBodyLink, dx: ControlInputState | np.ndarray = None, scale: float = None) -> None:
@@ -766,10 +752,10 @@ class RBSystemSpec(cmisc.PatchedModel):
 
 class SceneContext(cmisc.PatchedModel):
   cur_id: int = 0
-  mp: dict = Field(default_factory=dict)
-  obj2name: "dict[RigidBody,str]" = Field(default_factory=dict)
-  name2obj: "dict[str,RigidBody]" = Field(default_factory=dict)
-  basename2lst: dict[str, list] = Field(default_factory=lambda: cmisc.defaultdict(list))
+  mp: dict = cmisc.pyd_f(dict)
+  obj2name: "dict[RigidBody,str]" = cmisc.pyd_f(dict)
+  name2obj: "dict[str,RigidBody]" = cmisc.pyd_f(dict)
+  basename2lst: dict[str, list] = cmisc.pyd_f(lambda: cmisc.defaultdict(list))
 
   @property
   def roots(self) -> "list[RigidBody]":
@@ -825,7 +811,7 @@ def bias_force_0(s: RBState) -> SpatialVector:
 
 class ForceModel(cmisc.PatchedModel):
   nctrl_f: Callable[[int], int]
-  bias_force_f: Callable[[RBState], SpatialVector] = Field(default_factory=lambda: bias_force_0)
+  bias_force_f: Callable[[RBState], SpatialVector] = cmisc.pyd_f(lambda: bias_force_0)
   ctrl2model: Callable[["Simulator", np_array_like], np_array_like]
   model2ctrl: Callable[["Simulator", np_array_like], np_array_like]
 
@@ -842,15 +828,15 @@ class RBBuilderEntry(cmisc.PatchedModel):
 
 
 class RBDescEntry(cmisc.PatchedModel):
-  data: RBData = Field(default_factory=RBData)
+  data: RBData = cmisc.pyd_f(RBData)
   spec: SolidSpec = None
   parent: "RBDescEntry" = None
-  link_data: LinkData = Field(default_factory=LinkData)
+  link_data: LinkData = cmisc.pyd_f(LinkData)
 
 
 class NameRegister(cmisc.PatchedModel):
-  obj2name: dict[typing.Any, str] = Field(default_factory=dict)
-  name2cnt: dict[str, int] = Field(default_factory=lambda: cmisc.defaultdict(int))
+  obj2name: dict[typing.Any, str] = cmisc.pyd_f(dict)
+  name2cnt: dict[str, int] = cmisc.pyd_f(lambda: cmisc.defaultdict(int))
 
   def register(self, obj, proposal: str) -> str:
     num = self.name2cnt[proposal]
@@ -863,9 +849,9 @@ class NameRegister(cmisc.PatchedModel):
 
 
 class RBBuilderAcc(cmisc.PatchedModel):
-  entries: list[RBBuilderEntry] = Field(default_factory=list)
-  src_entries: list[RBDescEntry] = Field(default_factory=list)
-  dyn_links: list[RigidBodyLink] = Field(default_factory=list)
+  entries: list[RBBuilderEntry] = cmisc.pyd_f(list)
+  src_entries: list[RBDescEntry] = cmisc.pyd_f(list)
+  dyn_links: list[RigidBodyLink] = cmisc.pyd_f(list)
   sctx: SceneContext
 
   def build(self, link_data: LinkData, wl: Transform = None, center_com=True):
@@ -922,11 +908,11 @@ class RBBuilderAcc(cmisc.PatchedModel):
 
 
 class RBTree(cmisc.PatchedModel):
-  entries: list[RBDescEntry] = Field(default_factory=list)
+  entries: list[RBDescEntry] = cmisc.pyd_f(list)
   entry2child: dict[RBDescEntry,
-                    list[RBDescEntry]] = Field(default_factory=lambda: cmisc.defaultdict(list))
+                    list[RBDescEntry]] = cmisc.pyd_f(lambda: cmisc.defaultdict(list))
   child_links: dict[RBDescEntry,
-                    list[RigidBodyLink]] = Field(default_factory=lambda: cmisc.defaultdict(list))
+                    list[RigidBodyLink]] = cmisc.pyd_f(lambda: cmisc.defaultdict(list))
   sctx: SceneContext
   split_rigid: bool = False
 
@@ -989,7 +975,7 @@ class RBTree(cmisc.PatchedModel):
 
 class SceneState(cmisc.PatchedModel):
   t: float
-  root2data: dict[str, np.ndarray] = Field(default_factory=dict)
+  root2data: dict[str, np.ndarray] = cmisc.pyd_f(dict)
 
 
 class SceneData(cmisc.PatchedModel):
@@ -1001,7 +987,7 @@ class SceneData(cmisc.PatchedModel):
 
 class SceneSaver(cmisc.PatchedModel):
   sd: SceneData
-  states: list[SceneState] = Field(default_factory=list)
+  states: list[SceneState] = cmisc.pyd_f(list)
 
   def push_state(self, t):
     res = SceneState(t=t)
@@ -1024,7 +1010,7 @@ RigidBodyLink.update_forward_refs()
 
 
 class InverseDynamicsData(cmisc.PatchedModel):
-  delta_a_map: dict[str, JointSV] = Field(default_factory=dict)
+  delta_a_map: dict[str, JointSV] = cmisc.pyd_f(dict)
   q0: np_array_like
   sd: SceneData
 
@@ -1042,7 +1028,7 @@ class InverseDynamicsData(cmisc.PatchedModel):
 
 
 class InverseDynamicsOutput(cmisc.PatchedModel):
-  f_map: dict[str, SpatialVector] = Field(default_factory=dict)
+  f_map: dict[str, SpatialVector] = cmisc.pyd_f(dict)
   sys_spec: RBSystemSpec
 
   def pack(self) -> np.ndarray:
@@ -1262,7 +1248,7 @@ class Simulator(cmisc.PatchedModel):
 
 
 class SceneRegistar(cmisc.PatchedModel):
-  mp: dict[str, Callable[[], SceneData]] = Field(default_factory=dict)
+  mp: dict[str, Callable[[], SceneData]] = cmisc.pyd_f(dict)
 
   def register(self, s: str, func: Callable[[], SceneData], force: bool = False) -> str:
     assert force or s not in self.mp
@@ -1341,7 +1327,7 @@ class ControlParameters(cmisc.PatchedModel):
   use_rk4: bool = True
   enable_batch: bool = True
   full_jit: bool = True
-  ctrl_bounds: np_array_like | list = Field(default_factory=lambda: [-10, 10])
+  ctrl_bounds: np_array_like | list = cmisc.pyd_f(lambda: [-10, 10])
 
   @property
   def actual_dt(self) -> float:

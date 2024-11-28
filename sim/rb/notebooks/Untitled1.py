@@ -180,7 +180,7 @@ g_bh.run_sim(override_ctrl=None)
 # In[26]:
 
 
-from chdrft.utils.math import rot_look_at
+from chdrft.utils.omath import rot_look_at
 from __future__ import annotations
 class BlenderCam(cmisc.PatchedModel):
     cam: object

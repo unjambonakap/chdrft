@@ -2,60 +2,23 @@
 
 from __future__ import annotations
 
-from IPython.utils.frame import extract_module_locals
-from asq.initiators import query as asq_query
-from enum import Enum
-from pyqtgraph.Qt import QtGui, QtCore
-from rx import operators as ops
-from scipy import signal
-from scipy.stats.mstats import mquantiles
 import cv2
-import glog
-import glog
-import itertools
-import math
-import math, sys, os
+import os
 import numpy as np
-import numpy as np
-import pandas as pd
-import pyqtgraph as pg
-import scipy.ndimage as ndimage
-import sys
-import tempfile
 
 from chdrft.cmds import CmdsList
 from chdrft.main import app
-from chdrft.struct.base import Box, Range2D, g_unit_box
-from chdrft.struct.base import Range1D, Range2D, Intervals, ListTools, Box
+from chdrft.struct.base import Box, g_unit_box
+from chdrft.struct.base import Box
 from chdrft.utils.cmdify import ActionHandler
-from chdrft.utils.cmdify import ActionHandler
-from chdrft.utils.colors import ColorPool
-from chdrft.utils.fmt import Format
-from chdrft.utils.fmt import Format
-from chdrft.utils.misc import Attributize
 from chdrft.utils.misc import Attributize as A
-from chdrft.utils.misc import to_list, Attributize, proc_path
-from chdrft.utils.path import FileFormatHelper
-from chdrft.utils.swig import swig
-from chdrft.utils.types import *
+import chdrft.utils.misc as cmisc
 import chdrft.dsp.datafile as Dataset2d
 
-import chdrft.display.base
-import chdrft.utils.misc as cmisc
-import chdrft.utils.misc as cmisc
-
-from chdrft.cmds import CmdsList
-from chdrft.main import app
 from chdrft.utils.cmdify import ActionHandler
-from chdrft.utils.misc import Attributize
-import chdrft.utils.misc as cmisc
-import glog
-import math, sys, os
+import os
 import numpy as np
-from chdrft.utils.types import *
 import cv2
-import chdrft.utils.math as opa_math
-import chdrft.utils.geo as opa_geo
 
 global flags, cache
 flags = None
@@ -98,7 +61,7 @@ def downscale_img(img, downscale):
 
 
 def plot_img(img):
-  from chdrft.display.ui import GraphHelper, ImageEntry
+  from chdrft.display.ui import GraphHelper
   G = GraphHelper()
   p1 = Dataset2d(img)
   G.create_plot(images=[p1])
@@ -118,6 +81,7 @@ def to_cv_norm_img(img):
     img = (img * 255).astype(np.uint8)
   return img
 
+
 def save_image(fname, res):
   cv2.imwrite(fname, to_cv_norm_img(res))
 
@@ -128,14 +92,16 @@ def read_tiff(fname):
   return from_cv_norm_img(res)
 
 
-class ImageData(cmisc.Attr):
+class ImageData(A):
 
   @staticmethod
   def Make(data, **kwargs):
     if isinstance(data, str):
       return ImageData(img=read_tiff(data), **kwargs)
-    if isinstance(data, np.ndarray) and len(data.shape) == 1:
-      return ImageData(img=from_cv_norm_img(cv2.imdecode(data,cv2.IMREAD_UNCHANGED)), **kwargs)
+    if isinstance(data, bytes) or (isinstance(data, np.ndarray) and len(data.shape) == 1):
+      return ImageData(
+          img=from_cv_norm_img(cv2.imdecode(np.frombuffer(data), cv2.IMREAD_UNCHANGED)), **kwargs
+      )
     if isinstance(data, ImageData):
       return data.clone()
     if isinstance(data, dict):
@@ -242,7 +208,10 @@ class ImageData(cmisc.Attr):
     save_image(fname, self.img)
 
   def encode(self):
-    return cv2.imencode('.png', cv2.cvtColor(to_cv_norm_img(self.img), cv2.COLOR_RGB2BGR), [cv2.IMWRITE_PNG_COMPRESSION, 0])[1]
+    return cv2.imencode(
+        '.png', cv2.cvtColor(to_cv_norm_img(self.img), cv2.COLOR_RGB2BGR),
+        [cv2.IMWRITE_PNG_COMPRESSION, 0]
+    )[1]
 
   def get_at(self, p):
     pos = self.img_box.clampv(self.img_box.from_box_space(p))
@@ -266,6 +235,18 @@ class ImageData(cmisc.Attr):
     return self
 
   @property
+  def norm_cv(self):
+    r = self.clone()
+    r.set_image(to_cv_norm_img(r.img))
+    return r
+
+  @property
+  def flip_y(self):
+    r = self.clone()
+    r.set_image(self.img[::-1])
+    return r
+
+  @property
   def u8(self):
     r = self.clone()
     r.set_image((r.img * 255).astype(np.uint8))
@@ -284,7 +265,7 @@ class ImageData(cmisc.Attr):
   @property
   def obj(self):
     if self._obj is None:
-      return cmisc.Attr(typ='rect', gridpos=self.gridpos, box=self.box.fix(), geo=self.box.shapely)
+      return A(typ='rect', gridpos=self.gridpos, box=self.box.fix(), geo=self.box.shapely)
     return self._obj
 
   def __hash__(self):
@@ -300,7 +281,7 @@ class ImageData(cmisc.Attr):
 
   def plot(self, **kwargs):
     from chdrft.display.service import g_plot_service
-    return g_plot_service.plot(cmisc.Attr(images=[self], **kwargs))
+    return g_plot_service.plot(A(images=[self], **kwargs))
 
 
 def test(ctx):
@@ -308,7 +289,7 @@ def test(ctx):
 
 
 def main():
-  ctx = Attributize()
+  ctx = A()
   ActionHandler.Run(ctx)
 
 

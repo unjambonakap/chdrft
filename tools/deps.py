@@ -214,9 +214,9 @@ EOF
         self.pkgbuild.basedir = dest
       else:
         if not os.path.exists(dest):
-          self.do_cmd('git clone %s %s' % (url, dest))
+          self.do_cmd('git clone %s %s --depth=1' % (url, dest))
 
-        self.do_cmd('git fetch', dest)
+        self.do_cmd('git fetch --unshallow', dest)
 
       if version is not None: self.do_cmd('git checkout %s' % version, dest)
 
@@ -324,6 +324,8 @@ class DepDesc:
         destfile = os.path.basename(self.url)
         d.wget_package(self.url, destfile)
         path = cmisc.splitext_full(destfile)
+        if folder_name := self.kwargs.get('folder_name'):
+          path = os.path.join(os.path.dirname(path), folder_name)
         d.pkgbuild.basedir = path
 
       for cmd in self.pre_cmds:

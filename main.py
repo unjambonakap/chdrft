@@ -13,23 +13,23 @@ import random
 
 if not is_python2:
   from contextlib import ExitStack
-  import argcomplete
 
 
 class App:
 
   def __init__(self):
     self.flags = None
-    self.stack = None
+    self.stack: ExitStack = None
     self.override_flags = {}
     self.setup = False
     self.cache = None
     if not is_python2:
       self.global_context = ExitStack()
 
-    chdrft.config.env.setup(self)
+    self.env = chdrft.config.env.g_env
+    self.env.setup(self)
 
-  def setup_jup(self, cmdline='', **kwargs):
+  def setup_jup(self, cmdline='', argv=None, **kwargs):
     from chdrft.utils.misc import Attr
     argv = shlex.split(cmdline)
     self(force=1, argv=argv, **kwargs, keep_open_context=1)
@@ -70,8 +70,6 @@ class App:
 
     parser.add_argument('other_args', nargs=argparse.REMAINDER, default=['--'])
 
-    if not is_python2:
-      argcomplete.autocomplete(parser)
     flags = parser.parse_args(args=argv)
     if flags.other_args and flags.other_args[0] == '--':
       flags.other_args = flags.other_args[1:]
@@ -104,11 +102,14 @@ class App:
           if keep_open_context:
             stack = ExitStack()
             self.run(stack, main_func)
-          with ExitStack() as stack:
-            self.run(stack, main_func)
+          else:
+            with ExitStack() as stack:
+              self.run(stack, main_func)
       except Exception as e:
         if flags.pdb:
           pdb.post_mortem()
+        raise
+      except KeyboardInterrupt:
         raise
 
     if flags.pdb:

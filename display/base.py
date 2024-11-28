@@ -1,23 +1,12 @@
 #!/usr/bin/env python
 
-import os
 from chdrft.config.env import g_env
 
 qt_imports = g_env.get_qt_imports_lazy()
-import pyqtgraph as pg
-from chdrft.config.env import g_env, qt_imports
-from chdrft.cmds import CmdsList
-from chdrft.main import app
-from chdrft.utils.cmdify import ActionHandler
+from chdrft.config.env import g_env
 from chdrft.utils.misc import Attributize as A
-import chdrft.utils.misc as cmisc
-import glog
-import re
 import chdrft.struct.base as opa_struct
-import sys
 import numpy as np
-import chdrft.utils.geo as geo_utils
-import pymap3d
 import meshio
 
 
@@ -31,6 +20,9 @@ class TriangleActorBase:
     self.npoints = 0
     self.obj = None
     self.name = None
+
+  def map_points(self, mp):
+    self.points = mp(np.array(self.points))
 
   def add_points(self, pts):
     tb = []

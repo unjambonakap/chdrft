@@ -1,10 +1,6 @@
 #!/usr/bin/env python
 
-from chdrft.cmds import CmdsList
 from chdrft.main import app
-from chdrft.utils.cmdify import ActionHandler
-from chdrft.utils.misc import Attributize
-import glog
 
 
 class Swig:

@@ -7,6 +7,7 @@ from contextlib import ExitStack
 from chdrft.utils.fmt import Format
 import glog
 import sys
+import gzip
 
 
 def ProgDir(*args):
@@ -66,11 +67,12 @@ Cmds.add(func=FindEnv, args=[str])
 
 class FormatParams:
 
-  def __init__(self, mode=None, path=None, conf=None):
+  def __init__(self, mode=None, path=None, conf=None, gz=False):
     self.mode = mode
     if conf is None: conf = cmisc.Attr()
     self.conf = conf
     self.path = path
+    self.gz = gz
 
 
 class FileFormatHelper(ExitStack):
@@ -83,7 +85,7 @@ class FileFormatHelper(ExitStack):
     self.params = params
 
   @staticmethod
-  def GetParams(path, default_mode=''):
+  def GetParams(path, default_mode='', gz=False):
     before = path[:path.find('/')]
     mode = ''
     pos = before.find(':')
@@ -98,14 +100,12 @@ class FileFormatHelper(ExitStack):
       ext2mode = {'.yaml': 'yaml', '.json': 'json', '.pickle': 'pickle', '.csv': 'csv'}
       mode = ext2mode.get(ext, default_mode)
     else:
-      print(mode)
       split = mode.split(',', 1)
       mode = split[0]
       if len(split) == 2:
-        print(split[1])
         conf = Format(split[1]).from_conf().v
 
-    return FormatParams(mode, path, conf)
+    return FormatParams(mode, path, conf, gz=gz)
 
   @staticmethod
   def Read(filename, mode='', **kwargs):
@@ -124,7 +124,7 @@ class FileFormatHelper(ExitStack):
     return not self.mode in ('json', 'attr_yaml', 'yaml', 'csv', 'conf', 'txt')
 
   def binary_mode_str(self):
-    return 'b' if self.binary_mode else ''
+    return 'b' if self.binary_mode else 't'
 
   @property
   def mode(self):
@@ -139,8 +139,14 @@ class FileFormatHelper(ExitStack):
     if self.filename == '@stdin': self.file = sys.stdin
     elif self.filename == '@stdout': self.file = sys.stdout
     else:
-      if self.write_: self.file = open(self.filename, 'w' + self.binary_mode_str())
-      else: self.file = open(self.filename, 'r' + self.binary_mode_str())
+      open_func = open
+      if self.params.gz:
+        open_func = gzip.open
+
+      if self.write_:
+        self.file = open_func(self.filename, 'w' + self.binary_mode_str())
+      else:
+        self.file = open_func(self.filename, 'r' + self.binary_mode_str())
       self.enter_context(self.file)
     return self
 
@@ -218,6 +224,8 @@ class AnnotatedFiles(cmisc.ExitStack):
   def norm(self, e):
     e.path = f'{self.path}/{e.fname}'
     return e.path
+
+
 #with  AnnotatedFiles('./data', 'rots') as af:
 #    mesh_in =meshio.read('test.stl')
 #    for rot in gen_rot_grid(3):

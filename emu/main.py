@@ -2,7 +2,7 @@
 
 from chdrft.main import app
 from chdrft.utils.misc import cwdpath, Attributize, Arch, opa_print, to_list, lowercase_norm
-from chdrft.utils.math import rotlu32, modu32
+from chdrft.utils.omath import rotlu32, modu32
 from chdrft.emu.elf import ElfUtils, MEM_FLAGS
 from chdrft.emu.binary import X86Machine, cs_print_x86_insn, regs, Memory, Regs
 from chdrft.emu.syscall import SyscallDb

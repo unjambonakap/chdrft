@@ -5,16 +5,12 @@ from chdrft.main import app
 from chdrft.utils.cmdify import ActionHandler
 from chdrft.utils.misc import Attributize
 import chdrft.utils.misc as cmisc
-import glog
-import chdrft.display.vispy_utils as vispy_utils
-from chdrft.display.vispy_utils import ImageData
-from chdrft.display.service import g_plot_service as oplt
+from chdrft.dsp.image import ImageData
 
 import chdrft.display.utils as dsp_utils
 import random
 from chdrft.struct.base import Box
 import numpy as np
-import cv2
 from chdrft.struct.geo import QuadTree
 import skimage.transform
 
@@ -61,6 +57,7 @@ def get_boundaries(imgs):
 
 
 def render_compose(in_imgs, extra_meshes=[], render_boundaries=0, as_grid=0, **kwargs):
+  from chdrft.display.service import g_plot_service as oplt
 
   images = []
   for img_data in in_imgs:
@@ -225,6 +222,7 @@ def render_grid(grid):
 
 
 def cycle_ev(d):
+  import chdrft.display.vispy_utils as vispy_utils
 
   imgs = [x.obj for x in d.cnds if isinstance(x.obj.obj, ImageData) and x.score == 0]
   imgs.sort(key=lambda x: x.ctxobj.vispy.transform.translate[2])

@@ -5,9 +5,7 @@ import tempfile
 import os
 import shutil
 import json
-import argparse
 from urllib.parse import urljoin
-import concurrent.futures
 import traceback as tb
 
 

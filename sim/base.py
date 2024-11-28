@@ -6,15 +6,12 @@ from chdrft.main import app
 from chdrft.utils.cmdify import ActionHandler
 from chdrft.utils.misc import Attributize
 import chdrft.utils.misc as cmisc
-import glog
-import georinex as gr
-from chdrft.struct.geo import QuadTree
 import pymap3d
 import chdrft.display.vtk as opa_vtk
 import numpy as np
 from chdrft.geo.satsim import TileGetter
 import mercantile
-from chdrft.utils.math import MatHelper, rad2deg, deg2rad, rot_look_at, perspective
+from chdrft.utils.omath import MatHelper, rad2deg, rot_look_at, perspective
 from chdrft.utils.geo import *
 
 from chdrft.struct.base import Box, g_unit_box
@@ -22,12 +19,11 @@ import chdrft.struct.base as opa_struct
 import datetime
 import pytz
 import scipy.interpolate
-from moviepy.editor import VideoClip, ImageClip, concatenate_videoclips
 import chdrft.utils.Z as Z
-import spiceypy
 from chdrft.dsp.image import ImageData
 from chdrft.sim.rb.base import Transform
 from astropy import constants as const
+import pandas as pd
 
 global flags, cache
 flags = None
@@ -59,12 +55,6 @@ class Consts:
   EARTH_ROUND_ASTROPY = pymap3d.Ellipsoid(
       semimajor_axis=const.R_earth.value, semiminor_axis=const.R_earth.value
   )
-
-def do_visit(obj, func):
-  if func(obj):
-    for x in obj:
-      do_visit(x, func)
-
 
 
 def create_moon_data():
@@ -222,6 +212,7 @@ def load_edt_date(t):
 
 
 def spice_time(t_utc):
+  import spiceypy
   if not isinstance(t_utc, datetime.datetime): t_utc = datetime.datetime.utcfromtimestamp(t_utc)
   t_utc = t_utc.astimezone(pytz.utc)
   return spiceypy.str2et(t_utc.strftime('%Y-%m-%dT%H:%M:%S'))
@@ -229,17 +220,24 @@ def spice_time(t_utc):
 
 class InterpolatedDF:
 
-  def __init__(self, df, **kwargs):
+  def __init__(self, df, index=None, **kwargs):
     self.cols = cmisc.Attr()
-    self.df = df
-    for column in df.columns:
-      y = np.stack(df[column].to_numpy(), axis=0)
-      self.cols[column] = scipy.interpolate.interp1d(df.index.values, y, axis=0, **kwargs)
+
+    if isinstance(df, pd.DataFrame):
+      if index is None: index = df.index.values
+      df = {column: df[column].to_numpy() for column in df.columns}
+    self.index = index
+
+    for column, data in df.items():
+      y = np.stack(data, axis=0)
+      self.cols[column] = scipy.interpolate.interp1d(index, y, axis=0, fill_value=(y[0], y[-1]), bounds_error=False, **kwargs)
 
   def __call__(self, t):
     res = cmisc.Attr()
     for k, v in self.cols.items():
       res[k] = v(t)
+      if res[k].shape == ():
+        res[k] = res[k][()]
     return res
 
 
@@ -311,7 +309,7 @@ def create_earth_actors(
       tile_depth=tile_depth,
       ll_box=ll_box,
   )
-  do_visit(TMSQuad.Root(params), u)
+  u.run(TMSQuad.Root(params))
   return u
 
 
@@ -355,7 +353,6 @@ class CamActor(Actor):
 
   def setup_internal(self):
     self.actor = self.main.cam
-    pass
 
   def set_pos_and_rot(self, pos, rot):
     a = opa_vtk.vtk.vtkMatrixToHomogeneousTransform()
@@ -452,6 +449,7 @@ class Renderer:
       x.run(t, data=data)
 
   def process(self, tl, no_render=None, outfile=None):
+    from moviepy.editor import ImageClip, concatenate_videoclips
     imgs = []
     need_imgs = outfile or not no_render
     from chdrft.display.render import ImageGrid
@@ -488,6 +486,7 @@ class Renderer:
 
 
 def test(ctx):
+  import georinex as gr
   nav = gr.load(ctx.infile)
   tmp = nav.sel(sv='G01')
   x, y, z = gr.keplerian2ecef(tmp)
@@ -556,22 +555,20 @@ class TMSQuad:
     return iter(self.children)
 
   @property
-  def box_latlng(self):
+  def box_lonlat(self):
     bounds = mercantile.bounds(*self.xyz)
     box = Box(low=(bounds.west, bounds.south), high=(bounds.east, bounds.north))
     return box
 
   @property
-  def box_latlng_rad(self):
-    return Z.deg2rad(self.box_latlng)
+  def box_lonlat_rad(self):
+    return Z.deg2rad(self.box_lonlat)
+
 
   @property
-  def quad_ecef(self):
-    p = self.box_latlng.poly()
-    return opa_struct.Quad(
-        np.stack(pymap3d.geodetic2ecef(p[:, 1], p[:, 0], 0, ell=self.params.ell), axis=-1) *
-        self.params.m2u
-    )
+  def ecef_points(self):
+    p = self.box_lonlat.poly()
+    return np.stack(pymap3d.geodetic2ecef(p[:, 1], p[:, 0], 0, ell=self.params.ell), axis=-1) * self.params.m2u
 
   @property
   def xyz(self):
@@ -590,7 +587,19 @@ class TMSQuad:
     return f'xyz={self.xyz}'
 
 
-class CylindricalVisitor:
+class VisitorBase:
+
+  @classmethod
+  def DoVisit(cls, obj, func):
+    if func(obj):
+      for x in obj:
+        cls.DoVisit(x, func)
+
+  def run(self, obj):
+    VisitorBase.DoVisit(obj, self)
+
+
+class CylindricalVisitor(VisitorBase):
 
   def __init__(self, actor_builder, max_depth=2, m2u=1e3):
     self.m2u = m2u
@@ -613,13 +622,19 @@ class CylindricalVisitor:
 
   def run(self):
     root = Quad.Root()
-    do_visit(root, self)
+    super().run(root)
 
 
-class SimpleVisitor:
+class SimpleVisitor(VisitorBase):
 
   def __init__(
-      self, tg: TileGetter, actor_builder=None, max_depth=2, tile_depth=None, ll_box: Box = None
+      self,
+      tg: TileGetter,
+      actor_builder=None,
+      max_depth=2,
+      tile_depth=None,
+      ll_box: Box = None, # lon,lat
+      coord_map=lambda quad: quad.ecef_points,
   ):
     self.max_depth = max_depth
     if tile_depth is None: tile_depth = max_depth
@@ -630,9 +645,10 @@ class SimpleVisitor:
     self.actor_builder = actor_builder
     self.points = []
     self.tg = tg
+    self.coord_map = coord_map
 
   def __call__(self, obj: TMSQuad):
-    if not self.ll_box.intersects(obj.box_latlng_rad): return 0
+    if not self.ll_box.intersects(obj.box_lonlat_rad): return 0
     if obj.z < self.max_depth: return 1
 
     ttile = obj
@@ -642,10 +658,12 @@ class SimpleVisitor:
 
     actor = self.actor_builder()
     actor.name = str(obj)
-    actor.full_quad(obj.quad_ecef,
-                    uv=ttile.box_latlng.to_box_space(obj.box_latlng).quad.pts).build(tx)
+    pts = self.coord_map(obj)
+    actor.full_quad(
+        opa_struct.Quad(pts), uv=ttile.box_lonlat.to_box_space(obj.box_lonlat).quad.pts
+    ).build(tx)
     self.actors.append(actor)
-    self.points.extend(obj.quad_ecef.pts)
+    self.points.extend(pts)
     self.items.append(ttile)
     return 0
 

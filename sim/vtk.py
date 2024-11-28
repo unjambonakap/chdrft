@@ -4,13 +4,10 @@ from chdrft.cmds import CmdsList
 from chdrft.main import app
 from chdrft.utils.cmdify import ActionHandler
 from chdrft.utils.misc import Attributize
-import chdrft.utils.misc as cmisc
-import glog
 import numpy as np
-from chdrft.utils.types import *
+from chdrft.utils.opa_types import *
 from chdrft.sim.moon_sunrise import *
 from chdrft.display.vtk import *
-from chdrft.sim.base import Renderer
 
 global flags, cache
 flags = None
@@ -21,6 +18,35 @@ def args(parser):
   clist = CmdsList()
   moon_sunrise_params(parser)
   ActionHandler.Prepare(parser, clist.lst, global_action=1)
+
+
+class VTKHelper:
+
+  @staticmethod
+  def set_mat(obj, mat, is_cam):
+    if is_cam:
+      a = opa_vtk.vtk.vtkMatrixToHomogeneousTransform()
+      obj.SetPosition(0, 0, 0)
+      obj.SetFocalPoint(0, 0, -1)
+      obj.SetViewUp(0, 1, 0)
+      mat = np.linalg.inv(mat)
+      a.SetInput(numpy_to_vtk_mat(mat))
+      obj.SetUserViewTransform(a)
+    else:
+      a = opa_vtk.vtk.vtkMatrixToLinearTransform()
+      a.SetInput(numpy_to_vtk_mat(mat))
+      obj.SetUserTransform(a)
+
+  @staticmethod
+  def SimpleVisitor2Assembly(u, ren):
+    ass = opa_vtk.vtk.vtkAssembly()
+    for x in u.actors:
+      actor = x.obj
+      ass.AddPart(actor)
+      actor.GetProperty().SetAmbient(1)
+      actor.GetProperty().SetDiffuse(0)
+    ren.AddActor(ass)
+    return ass
 
 
 class MoonSunriseVTK(MoonSunrise):
@@ -39,36 +65,23 @@ class MoonSunriseVTK(MoonSunrise):
     self.configure_render(self.ctx.width, self.ctx.height)
     self.post_build()
 
-
   def update_display(self):
     self.ren.update()
     self.ren.ren_win.Render()
 
   def configure_earth_mat(self, **kwargs):
-    for k,v in kwargs.items():
+    for k, v in kwargs.items():
       find_node_io(self.earth_grp, k).default_value = v
 
   def post_build(self):
     earth = self.objs[ActorType.Earth]
 
-
   def set_mat(self, obj, mat):
     if obj.obj is None: return
-
-    if obj.type ==  ActorType.Cam:
-      a = opa_vtk.vtk.vtkMatrixToHomogeneousTransform()
-      obj.obj.SetPosition(0,0,0)
-      obj.obj.SetFocalPoint(0, 0, -1)
-      obj.obj.SetViewUp(0,1,0)
-      mat = np.linalg.inv(mat)
-      a.SetInput(numpy_to_vtk_mat(mat))
-      obj.obj.SetUserViewTransform(a)
+    is_cam = obj.type == ActorType.Cam
+    VTKHelper.set_mat(obj.obj, mat, is_cam)
+    if is_cam:
       self.configure_cam()
-    else:
-      a = opa_vtk.vtk.vtkMatrixToLinearTransform()
-      a.SetInput(numpy_to_vtk_mat(mat))
-      obj.obj.SetUserTransform(a)
-
 
   @property
   def actor_class(self):
@@ -77,14 +90,8 @@ class MoonSunriseVTK(MoonSunrise):
   def create_earth_actor_impl(self, u):
     name = 'earth'
 
-    earth_assembly = opa_vtk.vtk.vtkAssembly()
-    for x in u.actors:
-      actor = x.obj
-      earth_assembly.AddPart(actor)
-      actor.GetProperty().SetAmbient(1)
-      actor.GetProperty().SetDiffuse(0)
-    self.ren.ren.AddActor(earth_assembly)
-    return earth_assembly
+    ass = VTKHelper.SimpleVisitor2Assembly(u, self.ren.ren)
+    return ass
 
   def create_moon_actor_impl(self, ta):
     moon_actor = ta.obj
@@ -96,7 +103,7 @@ class MoonSunriseVTK(MoonSunrise):
   def create_camera_impl(self, internal):
     cam = self.ren.cam
     return cam
-  
+
   def configure_cam_internal(self, cam):
 
     #if self.ctx.rot_angle is not None: params.y = rotate_vec(params.y, z, flags.rot_angle)
@@ -107,22 +114,25 @@ class MoonSunriseVTK(MoonSunrise):
     cam.obj.SetClippingRange(1, 1e20)
 
   def render(self, fname):
-    return self.ren.render()
+    #px = qt_imports.QtGui.QPixmap(self.ctx.width, self.ctx.height)
+    self.ren.render(fname)
 
 
-def test1():
-  ctx = app.setup_jup(parser_funcs=[args])
+def test1(ctx):
   ctx.width = 2000
   ctx.height = 2000
   ctx.moon_model = None
+  ctx.moon_model = 'pic'
   ctx.earth_depth = 4
   ctx.earth_tile_depth = 3
-  ms = MoonSunriseBlender(ctx)
+  ms = MoonSunriseVTK(ctx)
   ms.build()
   print('done build')
   ms.configure_at(ms.tgtime)
-  ms.render('/tmp/render1.png')
-  app.cache.flush_cache()
+  if ctx.offscreen:
+    ms.render('/tmp/render1.png')
+  else:
+    ms.ren.run()
 
 
 def main():

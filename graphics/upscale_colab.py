@@ -88,8 +88,6 @@ def encode_img(img):
 
 
 def make_pipeline():
-  from PIL import Image
-  from io import BytesIO
   from diffusers import StableDiffusionUpscalePipeline
   import torch
   # load model and scheduler

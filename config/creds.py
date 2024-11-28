@@ -8,7 +8,7 @@ import chdrft.utils.misc as cmisc
 from chdrft.utils.misc import Attributize as A
 import glog
 import numpy as np
-from chdrft.utils.types import *
+from chdrft.utils.opa_types import *
 from pydantic import Field
 from chdrft.utils.path import FileFormatHelper
 import os

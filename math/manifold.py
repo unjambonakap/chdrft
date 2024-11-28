@@ -13,7 +13,7 @@ from chdrft.struct.base import Range1D
 from scipy.optimize import fsolve
 import sympy
 import numpy as np
-from chdrft.utils.math import *
+from chdrft.utils.omath import *
 
 
 global flags, cache

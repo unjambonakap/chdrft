@@ -6,23 +6,17 @@ from chdrft.utils.cmdify import ActionHandler
 from chdrft.utils.misc import Attributize
 from chdrft.utils.misc import Attributize as A
 import chdrft.utils.misc as cmisc
-import glog
-import math, sys, os
+import math
 import numpy as np
-from chdrft.utils.types import *
 from enum import Enum
-from chdrft.utils.path import FileFormatHelper
-from chdrft.utils.fmt import Format
 from chdrft.struct.base import Box
-import rx
-import rx.subject
+import reactivex as rx
+from chdrft.config.env import g_env
 
 import PyQt5.QtWidgets as QtWidgets
 from PyQt5.QtWidgets import (
-    QApplication, QMainWindow, QWidget, QLabel, QSpinBox, QComboBox, QGridLayout, QVBoxLayout,
-    QSplitter
+    QMainWindow, QWidget, QGridLayout
 )
-from PyQt5.QtCore import (QSize)
 import PyQt5.QtCore as QtCore
 import PyQt5.QtGui as QtGui
 from chdrft.display.ui import PlotManager, OpaPlot
@@ -31,7 +25,6 @@ global flags, cache
 flags = None
 cache = None
 
-g_data = A()
 
 def args(parser):
   clist = CmdsList()
@@ -574,16 +567,10 @@ def qt_dialog(parent, name, default='', typ=None):
   if typ is not None: res = typ(res)
   return res
 
-def create_app(ctx=dict()):
-  app = QApplication.instance()
-  if app is None:
-    # needs to be stored otherwise GCed
-    g_data.app = QApplication(ctx.get('other_args', []))
-  return app
 
 
 def create_window(ctx):
-  app = create_app(ctx)
+  app = g_env.create_app(ctx)
   win = MainWindow(ctx)
   return win, app
 

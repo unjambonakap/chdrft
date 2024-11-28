@@ -55,7 +55,6 @@ class ArcballCamera(Base3DRotationCamera):
         self._quaternion = Quaternion()
         self.distance = distance  # None means auto-distance
         self.translate_speed = translate_speed
-        from vispy.visuals import transforms
         
         
     def viewbox_mouse_event(self, event):

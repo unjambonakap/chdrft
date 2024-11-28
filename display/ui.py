@@ -1,18 +1,15 @@
 #!/usr/bin/env python
 
 from chdrft.display.base import qt_imports
-import sys
 import numpy as np
 import pyqtgraph as pg
 pg.setConfigOption('imageAxisOrder', 'row-major')  # fuckoff
 
-import scipy.ndimage as ndimage
-from scipy import signal
 import glog
 import pandas as pd
 from vispy.color import Color, get_colormap
 
-from chdrft.utils.misc import to_list, Attributize, proc_path, is_interactive
+from chdrft.utils.misc import to_list, Attributize, is_interactive
 from chdrft.utils.colors import ColorPool
 from asq.initiators import query as asq_query
 from chdrft.display.dsp_ui import DspTools
@@ -30,6 +27,7 @@ import glog
 from chdrft.config.env import g_env
 from chdrft.utils.rx_helpers import ImageIO
 import contextlib
+import chdrft.utils.rx_helpers as rx_helpers
 
 from chdrft.dsp.datafile import Dataset2d, Dataset
 
@@ -80,15 +78,33 @@ class EventHelper:
   def key(self):
     return self.ev.key()
 
+class MLine(pg.InfiniteLine):
+  def __init__(self, *args, **kwargs):
+    super().__init__(*args, **kwargs)
+    self.show()
+    self.obs = rx_helpers.WrapRX(rx_helpers.rx.Subject())
+    self.sigPositionChanged.connect(self.notify_changed)
+
+  def notify_changed(self):
+    self.obs.on_next(self.pos())
 
 class SamplingRegion(pg.LinearRegionItem):
 
-  def __init__(self, plot):
+  def __init__(self, plot, p0, p1):
     super().__init__()
     self.hide()
     self.plot = plot
     plot.addItem(self)
     self.removed = False
+
+    self.show()
+    self.lines[0].setPos(p0)
+    self.lines[1].setPos(p1)
+    self.lines[1].setEnabled(True)
+    self.obs = rx_helpers.WrapRX(rx_helpers.rx.Subject())
+
+    self.lines[0].sigPositionChanged.connect(self.notify_changed)
+    self.lines[1].sigPositionChanged.connect(self.notify_changed)
     #self.contextMenu.addAction('test').triggered.connect(self.action1)
 
   def __del__(self):
@@ -114,6 +130,9 @@ class SamplingRegion(pg.LinearRegionItem):
   def set_right(self, pos):
     self.lines[1].setPos(pos)
 
+  def notify_changed(self):
+    self.obs.on_next((self.lines[0].pos(), self.lines[1].pos()))
+
   def notify_key_press(self, h):
     h.ev.accept()
     if h.key() == qt_imports.QtCore.Qt.Key_H:
@@ -123,15 +142,6 @@ class SamplingRegion(pg.LinearRegionItem):
     else:
       h.ev.ignore()
 
-  def notify_mouse_press(self, ev):
-    if self.isVisible():
-      return
-    self.show()
-    view_coord = self.plot.to_view_coord(ev.pos())
-    glog.debug('put at %s', view_coord)
-    self.lines[0].setPos(view_coord)
-    self.lines[1].setPos(view_coord)
-    self.lines[1].setEnabled(True)
 
   def notify_mouse_release(self, ev):
     pass
@@ -178,21 +188,27 @@ class RegionManager:
     self.plot = plot
     self.regions = []
     self.last = None
-    self.set_menu()
+    self.menu = self.set_menu()
     self.create_keys = [qt_imports.QtCore.Qt.Key_H, qt_imports.QtCore.Qt.Key_L]
     self.active_region = None
 
   def set_menu(self):
     region_menu = self.plot.menu.add_menu('regions')
     region_menu.addAction('clear', self.clear)
+    region_menu.addAction('Add region', self.add_region)
+    return region_menu
 
   def clear(self):
     for r in self.regions:
       r.remove()
     self.regions = []
 
-  def add_region(self):
-    region = SamplingRegion(self.plot)
+  def add_region(self, pos=None, p2=None) -> SamplingRegion:
+    if pos is None:
+      pos = self.plot.data.mouse_press.pos()
+    if p2 is None: p2 = pos
+
+    region = SamplingRegion(self.plot, pos, p2)
     glog.debug('new region')
     self.regions.append(region)
     self.last = region
@@ -211,29 +227,30 @@ class RegionManager:
     if len(self.regions) > 0:
       self.last = self.regions[-1]
 
-  def key_press(self, h):
+  def key_press(self, h: EventHelper):
     if h.key() in self.create_keys:
       if not self.last:
-        self.add_region()
+        self.add_region(h.pos())
       self.last.notify_key_press(h)
-      return
+      return True
 
     if h.key() == qt_imports.QtCore.Qt.Key_Escape or h.key() == qt_imports.QtCore.Qt.Key_Delete:
       r = self.find_hovering()
       if r:
         self.remove_region(r)
+        return True
+    return False
 
   def notify_press(self):
     self.active_region = None
 
-  def mouse_press(self, ev):
+  def mouse_press(self, ev: EventHelper):
     self.active_region = self.find_hovering()
-    if not EventHelper(ev).has_meta():
+    if not ev.has_meta():
       return
-    if ev.button() != qt_imports.QtCore.Qt.LeftButton:
+    if ev.ev.button() != qt_imports.QtCore.Qt.LeftButton:
       return
-    region = self.add_region()
-    region.notify_mouse_press(ev)
+    region = self.add_region(ev.pos())
 
   def filter(self, dataset):
     manager = self.plot.manager
@@ -274,12 +291,13 @@ class Marks:
       self.add_line(pos)
       pos += period
 
-  def add_line(self, pos):
-    line = pg.InfiniteLine(pos, 90, movable=False)
+  def add_line(self, pos, movable=False):
+    line = MLine(pos, 90, movable=movable)
     line.show()
     self.plot.addItem(line)
     #line.sigPositionChangeFinished.connect(lambda: self.drag_line(line))
     self.lines.append(line)
+    return line
 
   def build_dataset(self, filter):
     if not self.lines:
@@ -442,7 +460,6 @@ class ShadowPlotEntry:
     return False
 
   def sig_range_changed(self, _, new_view_range):
-    glog.debug('RNAGE CHANGED >> %s', new_view_range)
     self.update_view_range(new_view_range)
 
   def update(self):
@@ -591,7 +608,7 @@ class ActionManager:
       self.drag_curve.notify_key(h.key())
       return True
     else:
-      self.plot.regions.key_press(h)
+      return self.plot.regions.key_press(h)
     return False
 
   def mouse_press(self, h):
@@ -633,6 +650,7 @@ class OpaPlot(pg.PlotWidget):
     self.sigRangeChanged.connect(self.sig_range_changed)
     self.viewbox = self.getPlotItem().getViewBox()
     self.legend = legend
+    self.data = cmisc.A(default_none=True)
 
     if legend: self.addLegend()
 
@@ -793,6 +811,7 @@ class OpaPlot(pg.PlotWidget):
 
     self.update_all()
     helper = EventHelper(ev, pos=self.get_cursor_pos())
+    self.data.mouse_press=helper
     self.regions.notify_press()
     if self.action_manager.mouse_press(helper):
       return
@@ -802,7 +821,7 @@ class OpaPlot(pg.PlotWidget):
     if ev.isAccepted():
       return
 
-    self.regions.mouse_press(ev)
+    self.regions.mouse_press(helper)
 
   def mouseReleaseEvent(self, ev):
     helper = EventHelper(ev, pos=self.get_cursor_pos())

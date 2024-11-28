@@ -1,19 +1,13 @@
 #!/usr/bin/env python
 
-import chdrft.config.env
 from chdrft.cmds import CmdsList
 from chdrft.main import app
 from chdrft.utils.cmdify import ActionHandler
 from chdrft.utils.misc import Attributize
 import chdrft.utils.misc as cmisc
 from chdrft.utils.misc import Attributize as A
-import glog
 import numpy as np
-from chdrft.utils.types import *
-from pydantic.v1 import Field
-from chdrft.utils.path import FileFormatHelper
-from chdrft.utils.fmt import Format
-from chdrft.sim.rb.rb_gen import SimulHelper, ControlInputState, ControlParameters, ControlSpec, Simulator, NumpyPacker
+from chdrft.sim.rb.rb_gen import SimulHelper, ControlInputState, ControlParameters, ControlSpec, NumpyPacker
 import pygmo as pg
 
 global flags, cache
@@ -34,7 +28,7 @@ class RBSolver(cmisc.PatchedModel):
 
   spec: ControlSpec
   inner_state: np.ndarray = None
-  solver_params: SolverParameters = Field(default_factory=SolverParameters)
+  solver_params: SolverParameters = cmisc.pyd_f(SolverParameters)
 
   @cmisc.cached_property
   def time_ctrl_packer(self) -> NumpyPacker:
@@ -193,7 +187,7 @@ class MPCOutputEntry(cmisc.PatchedModel):
 
 
 class MPCOutput(cmisc.PatchedModel):
-  entries: list[MPCOutputEntry] = Field(default_factory=list)
+  entries: list[MPCOutputEntry] = cmisc.pyd_f(list)
   ctrl_spec: ControlSpec
 
   def get_ctrl(self, t: float) -> np.ndarray | None:
@@ -227,7 +221,7 @@ class MPCParameters(cmisc.PatchedModel):
 
 
 class MPCController(cmisc.PatchedModel):
-  model: MPCModel = Field(default_factory=MPCModel)
+  model: MPCModel = cmisc.pyd_f(MPCModel)
   output: MPCOutput = None
   params: MPCParameters
   spec_predict: ControlSpec = None

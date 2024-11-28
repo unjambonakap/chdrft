@@ -1,24 +1,21 @@
 #!/usr/bin/env python
 
-from chdrft.config.env import g_env, qt_imports
+from chdrft.config.env import qt_imports
 from chdrft.cmds import CmdsList
 from chdrft.main import app
 from chdrft.utils.cmdify import ActionHandler
 from chdrft.utils.misc import Attributize
 import chdrft.utils.misc as cmisc
-import glog
 import chdrft.display.vispy_utils as vispy_utils
 import re
 import chdrft.struct.base as opa_struct
 import cv2
 import io
 import vtk
-import sys
 import numpy as np
 from IPython.lib import guisupport
 from vispy.color import get_colormap, Color
 from vtk.util import numpy_support, vtkImageImportFromArray, vtkImageExportToArray
-import chdrft.utils.geo as geo_utils
 from chdrft.display.base import TriangleActorBase
 
 global flags, cache
@@ -33,22 +30,24 @@ def numpy_to_vtk_mat(mat):
 
 
 def vtk_matrix_to_numpy(mat):
-  res = np.zeros((4,4))
+  res = np.zeros((4, 4))
   if isinstance(mat, vtk.vtkMatrix4x4):
-    n =4
+    n = 4
   else:
     n = 3
-    res[3,3] = 1
+    res[3, 3] = 1
   for i in range(n):
     for j in range(n):
-      res[i,j] = mat.GetElement(i,j)
+      res[i, j] = mat.GetElement(i, j)
 
   return res
 
+
 def vtk_mulnorm(m, v):
-  v = list(v)+[1]
+  v = list(v) + [1]
   v = m.MultiplyPoint(v)
-  return np.array(v[:3])/v[-1]
+  return np.array(v[:3]) / v[-1]
+
 
 def vtk_offscreen_obj(width=800, height=600):
   ren_win = vtk.vtkRenderWindow()
@@ -57,6 +56,7 @@ def vtk_offscreen_obj(width=800, height=600):
   ren_win.AddRenderer(ren)
 
   # Add the actors to the renderer, set the background and size
+  ren.SetBackground(0.1, 0.1, 0.1)
   ren.SetBackground(0.1, 0.2, 0.4)
   ren_win.SetSize(width, height)
   print(ren_win.GetMultiSamples(), ren.GetUseFXAA())
@@ -66,8 +66,13 @@ def vtk_offscreen_obj(width=800, height=600):
   ren_win.SetLineSmoothing(True)
   ren.ResetCamera()
   cam = ren.GetActiveCamera()
-  res = cmisc.Attr(ren=ren, ren_win=ren_win, cam=cam, aspect=width/height,
-                    render_box=opa_struct.Box(low=(0,0), dim=(width, height)))
+  res = cmisc.Attr(
+      ren=ren,
+      ren_win=ren_win,
+      cam=cam,
+      aspect=width / height,
+      render_box=opa_struct.Box(low=(0, 0), dim=(width, height))
+  )
 
   def render(outfile=None):
     ren_win.Render()
@@ -75,7 +80,6 @@ def vtk_offscreen_obj(width=800, height=600):
     w2if.ReadFrontBufferOff()
     w2if.SetInput(ren_win)
     w2if.Update()
-
 
     if outfile is not None:
       writer = vtk.vtkPNGWriter()
@@ -91,9 +95,9 @@ def vtk_offscreen_obj(width=800, height=600):
       data = data[0]
 
     return data
+
   res.render = render
   return res
-
 
 
 def vtk_main_obj(*args, **kwargs):
@@ -125,7 +129,7 @@ def vtk_main_obj(*args, **kwargs):
     def __init__(self, width=800, height=600):
       self.width = width
       self.height = height
-      self.render_box=opa_struct.Box(low=(0,0), dim=(width, height))
+      self.render_box = opa_struct.Box(low=(0, 0), dim=(width, height))
 
       #assert g_env.qt5 == 0
       self.app = guisupport.get_app_qt4()
@@ -370,7 +374,6 @@ def vtk_main_obj(*args, **kwargs):
 
       self.ren_win.Render()
 
-
   return vtkMain(*args, **kwargs)
 
 
@@ -477,9 +480,9 @@ g_tex_quad = opa_struct.g_unit_box.quad
 
 
 class TriangleActorVTK(TriangleActorBase):
+
   def _norm_tex(self, tex):
     return numpy2tex(tex[::-1])
-
 
   def _build_impl(self, tex):
 
@@ -512,8 +515,9 @@ class TriangleActorVTK(TriangleActorBase):
     actor = vtk.vtkActor()
     actor.SetMapper(mapper)
     actor.SetTexture(tex)
-    actor.GetProperty().BackfaceCullingOn();
+    actor.GetProperty().BackfaceCullingOn()
     return actor
+
 
 def create_vtk_reader(fname):
   if fname.endswith('.png'):
@@ -524,6 +528,7 @@ def create_vtk_reader(fname):
   reader.SetFileName(fname)
   reader.Update()
   return reader
+
 
 def vtk_do_flip(cur, flipx, flipy):
   for i, f in enumerate((flipx, flipy)):
@@ -545,10 +550,9 @@ def create_image_actor_base(idata):
   atext.SetInputConnection(cur.GetOutputPort())
 
   plane = vtk.vtkPlaneSource()  # size 1x1, normal z, centered on 0
-  plane.SetCenter(0,0,0)
-  plane.SetNormal(0,0,1)
+  plane.SetCenter(0, 0, 0)
+  plane.SetNormal(0, 0, 1)
   plane.Update()
-
 
   atext.InterpolateOn()
 
@@ -587,6 +591,7 @@ def compute_cam_intersection(cam, plane, aspect):
 def read_img_gray_from_buf(buf):
   img = cv2.imdecode(np.asarray(bytearray(io.BytesIO(buf).read()), dtype=np.uint8), 0)
   return img
+
 
 def numpy2tex(data):
   return reader2tex(numpy_to_vtk_image(data))
@@ -636,8 +641,7 @@ def png2tex(fname):
 def test(ctx):
 
   #create our new Qt MainWindow
-
-  main_obj = vtkMain()
+  main_obj = vtk_main_obj()
   #create our new custom VTK Qt widget
 
   t = np.linspace(0, 1, 100)
@@ -654,7 +658,7 @@ def test(ctx):
 
 def test_triangles(ctx):
 
-  main_obj = vtkMain()
+  main_obj = vtk_main_obj()
   #create our new custom VTK Qt widget
 
   t = np.linspace(0, 1, 100)

@@ -6,9 +6,8 @@ from chdrft.utils.cmdify import ActionHandler
 from chdrft.utils.misc import A
 from chdrft.utils.misc import Attributize
 import chdrft.utils.misc as cmisc
-import glog
 import numpy as np
-from chdrft.utils.types import *
+from chdrft.utils.opa_types import *
 import chdrft.display.vispy_utils as vispy_utils
 from chdrft.struct.base import Box, g_unit_box, Range1D, GenBox
 import sys
@@ -18,26 +17,21 @@ import time
 from enum import Enum
 import shapely.geometry as geometry
 import chdrft.utils.geo as geo_utils
-import rx
-import rx.core
-import rx.subject
-from rx import operators as ops
+import reactivex as rx
 import chdrft.math.sampling as sampling
 import cv2
 import sortedcontainers
 import chdrft.display.grid as grid
 from vispy.plot import Fig
-from pydantic.v1 import Field
-from typing import ClassVar
+import chdrft.utils.colors as ocolors
 
 from PyQt5 import QtCore
 from PyQt5.QtCore import Qt
-from chdrft.utils.rx_helpers import ImageIO, FuncCtxImageProcessor, FuncImageProcessor
+from chdrft.utils.rx_helpers import ImageIO, FuncImageProcessor
 
 import PyQt5.QtWidgets as QtWidgets
 from PyQt5.QtWidgets import (
-    QApplication, QMainWindow, QWidget, QLabel, QSpinBox, QComboBox, QGridLayout, QVBoxLayout,
-    QSplitter
+    QWidget, QSplitter
 )
 try:
   import av
@@ -57,7 +51,7 @@ def args(parser):
 
 class VideoReader:
 
-  def __init__(self, fname, format=None):
+  def __init__(self, fname, format='rgb24'):
     self.fname = fname
     self.format = format
 
@@ -71,10 +65,11 @@ class VideoReader:
     self.nframes = self.stream.frames
     self.averate_rate_is = float(self.stream.guessed_rate)
     self.r = Range1D(self.stream.start_time, n=self.stream.duration, is_int=1)
-    self._gen = None
+    self._gen = self.gen()
 
   def rel2ts(self, rel):
-    rel = TimeSpec.Make(rel, typ='rel')
+    rel = TimeSpec.Make(rel, typ=TimeSpecType.Rel)
+
     if rel.is_ts(): return rel
     return TimeSpec.MakeTS(self.r.from_local(rel.v))
 
@@ -113,35 +108,36 @@ class VideoReader:
           yield fo.img
 
   def get_frame_out(self, frame):
+    fx = self.frame2numpy(frame)
     return cmisc.Attr(
+        base=frame,
         ts=frame.pts,
         time=self.ts2time(frame.pts),
         rel=self.ts2rel(frame.pts),
-        img=vispy_utils.ImageData(self.frame2numpy(frame), inv=0),
+        img=vispy_utils.ImageData(fx, inv=1),
     )
 
   def get_next(self):
-    return next(self._gen)
+    return next(self._gen, None)
 
   def seek(self, rel, **kwargs):
     ts = self.r.clampv(self.rel2ts(rel).v)
-    self.container.seek(ts, stream=self.stream)
+    self.container.seek(int(ts), stream=self.stream)
 
     self._gen = self.gen(**kwargs)
 
 
 class TimeSpecType(Enum):
-  Rel = 1,
-  TS = 2,
-  S = 3,
+  Rel = 1
+  TS = 2
+  S = 3
   FID = 4
 
 
-class TimeSpec:
+class TimeSpec(cmisc.PatchedModel):
 
-  def __init__(self, v, typ):
-    self.v = v
-    self.typ = typ
+  v: float
+  typ: TimeSpecType
 
   def is_ts(self):
     return self.typ == TimeSpecType.TS
@@ -149,7 +145,7 @@ class TimeSpec:
   @staticmethod
   def Make(v, typ):
     if isinstance(v, TimeSpec): return v
-    return TimeSpec(v, typ)
+    return TimeSpec(v=v, typ=typ)
 
   @staticmethod
   def MakeTS(v):
@@ -221,7 +217,7 @@ class DrawContext:
   def __init__(self, mw, start_key):
     self.mw = mw
     self.canvas = mw.canvas
-    self.vctx = mw.vctx
+    self.vctx: vispy_utils.VispyCtx = mw.vctx
     self.run = 0
     self.start_key = start_key
     self.idx = 0
@@ -235,18 +231,20 @@ class DrawContext:
     self.finish(cancel)
 
   def clear_impl(self):
-    cx = cmisc.flatten([x.objs for x in self.data])
+    cx = cmisc.flatten([x.meshes for x in self.data])
     self.vctx.remove_objs(cx)
     self.data = []
 
   def clear(self):
     self.clear_impl()
 
-  def handle_key(self, ev):
+  def handle_key(self, ev, last_mouse):
     if ev.key == 'Escape' and self.run:
       self.end(cancel=1)
     if ev.key == 'Enter' and self.run:
       self.end(cancel=0)
+    if ev.key == 'Delete' and self.run:
+      self.delete(last_mouse)
     if ev.key == 'c' and self.run:
       self.clear()
 
@@ -258,6 +256,22 @@ class DrawContext:
     else:
       return 0
     return 1
+
+  def add_item(self, entry, *descs):
+    descs = [x.update(fromobj=entry) for x in descs]
+    entry.meshes = self.create_meshes(*descs)
+    entry.src = self
+    self.data.append(entry)
+
+  def delete(self, last_mouse):
+    ql = self.vctx.do_query(last_mouse.wpos)
+
+    for cnd in ql.cnds:
+      u = cnd.obj.obj
+      if u.get('src') != self: continue
+      self.data.remove(u)
+      self.vctx.remove_objs(u.meshes)
+      break
 
   def handle_key_impl(self, ev):
     return 0
@@ -275,13 +289,13 @@ class DrawContext:
     self.finish_internal(cancel)
 
   def finish_internal(self, cancel):
-    raise NotImplementedError()
+    pass
 
   def handle_click(self, wpos):
-    raise NotImplementedError()
+    pass
 
   def build_current_impl(self, wpos):
-    raise NotImplementedError()
+    return []
 
   def clear_objs(self):
     self.vctx.remove_objs(self.objs)
@@ -305,6 +319,35 @@ class DrawContext:
     self.objs = new_objs
 
 
+class PointContext(DrawContext):
+
+  def __init__(self, mw):
+    super().__init__(mw, 'u')
+    self.wpos = None
+    self.clear()
+
+  def clear_impl(self):
+    super().clear_impl()
+    self.cmap = ocolors.ColorPool(looping=True)
+
+  def build_current_impl(self, wpos):
+    return self.create_meshes(cmisc.Attr(points=[wpos], color=self.cmap(remove=False)), temp=1)
+
+  def handle_click(self, wpos):
+    self.wpos = wpos
+    col = self.cmap()
+    self.add_item(
+        A(obj=self.wpos, geo=geometry.Point(list(wpos)), color=col),
+        A(
+            points=[self.wpos],
+            color=col,
+        )
+    )
+
+  def finish_internal(self, cancel):
+    pass
+
+
 class BoxContext(DrawContext):
 
   def __init__(self, mw):
@@ -320,14 +363,13 @@ class BoxContext(DrawContext):
   def add_box(self, box, **kwargs):
     obj = cmisc.Attr(geo=box.shapely, box=box, idx=self.idx, typ='box', **kwargs)
     dx = cmisc.Attr(polyline=box.poly_closed(), obj=obj)
-    dx.objs = self.vctx.plot_meshes(
-        cmisc.Attr(
+    self.add_item(
+        dx, cmisc.Attr(
             lines=[dx],
             color='g',
             points=vispy_utils.POINTS_FROM_LINE_MARKER,
         )
-    ).objs
-    self.data.append(dx)
+    )
     self.finish()
 
   def handle_click(self, wpos):
@@ -358,14 +400,11 @@ class PolyContext(DrawContext):
 
     obj = cmisc.Attr(geo=geometry.Polygon(pts), idx=self.idx, typ='poly', **kwargs)
     dx = cmisc.Attr(polyline=pts + pts[0:1], obj=obj)
-    dx.objs = self.vctx.plot_meshes(
-        cmisc.Attr(
-            lines=[dx],
-            color='r',
-            points=vispy_utils.POINTS_FROM_LINE_MARKER,
-        )
-    ).objs
-    self.data.append(dx)
+    self.add_item(dx, A(
+        lines=[dx],
+        color='r',
+        points=vispy_utils.POINTS_FROM_LINE_MARKER,
+    ))
 
   def finish_internal(self, cancel):
 
@@ -521,6 +560,28 @@ class FigWidget(SingleChildW):
     self.set_single_child(self.fig.native)
 
 
+class OMouseEvent(cmisc.PatchedModel):
+  raw: object
+  wpos: np.ndarray
+  pos: np.ndarray
+  modifiers: list
+  is_left: bool
+  src: object
+  move: bool = False
+
+  @classmethod
+  def Make(cls, vctx: vispy_utils.VispyCtx, raw: object, src: object, move: bool = False):
+    return OMouseEvent(
+        raw=raw,
+        wpos=vctx.screen_to_world(raw.pos),
+        pos=raw.pos,
+        modifiers=raw.modifiers,
+        is_left=raw.button == 1,
+        src=src,
+        move=move,
+    )
+
+
 class GraphWidget(SingleChildW):
 
   def __init__(self, hint_box=None):
@@ -542,12 +603,13 @@ class GraphWidget(SingleChildW):
     self.canvas.events.mouse_move.connect(self.mouse_move)
 
     self.dcs = cmisc.Attr()
-    dcs_classes = [PolyContext, BoxContext, RectContext]
+    dcs_classes = [PolyContext, BoxContext, RectContext, PointContext]
     for cl in dcs_classes:
       self.dcs[cl.__name__] = cl(self)
 
     self.set_single_child(self.canvas.native)
     self.wpos = None
+    self.last_mouse = None
 
     #self.canvas.native.setParent(self)
 
@@ -557,12 +619,12 @@ class GraphWidget(SingleChildW):
     self.augment_ev(ev)
 
     for dc in self.dcs.values():
-      if dc.run and dc.handle_key(ev):
+      if dc.run and dc.handle_key(ev, self.last_mouse):
         ev.native.accept()
         return
 
     for dc in self.dcs.values():
-      if dc.handle_key(ev):
+      if dc.handle_key(ev, self.last_mouse):
         ev.native.accept()
         return
 
@@ -572,8 +634,12 @@ class GraphWidget(SingleChildW):
         return
 
   def mouse_press(self, ev):
-    self.wpos = self.vctx.screen_to_world(ev.pos)
-    self.augment_ev(ev)
+    ev = OMouseEvent.Make(self.vctx, ev, self, move=False)
+    self.wpos = ev.wpos
+    self.last_mouse = ev
+
+    if not vispy_utils.vispy_keys.SHIFT in ev.modifiers: return
+    if not ev.is_left: return
     for dc in self.dcs.values():
       dc.notify_mouse(ev)
 
@@ -582,19 +648,24 @@ class GraphWidget(SingleChildW):
     ev.wpos = self.wpos
 
   def mouse_move(self, ev):
-    self.wpos = self.vctx.screen_to_world(ev.pos)
-    self.augment_ev(ev)
+    ev = OMouseEvent.Make(self.vctx, ev, self, move=True)
+    self.last_mouse = ev
+    self.wpos = ev.wpos
     for dc in self.dcs.values():
       dc.notify_mouse(ev, move=1)
 
 
 class VideoSource(SingleChildW):
 
-  def __init__(self, infile, **kwargs):
+  def __init__(self, infile, set_frame_db=False, **kwargs):
     super().__init__()
+    self.frame_db = None
+    self.first = True
 
     self.video = VideoReader(infile, **kwargs)
     self.setWindowTitle(f'Floating {infile}')
+    if set_frame_db:
+      self.frame_db = VideoFrameDb(infile)
 
     splitter = QSplitter(Qt.Vertical)
 
@@ -608,6 +679,7 @@ class VideoSource(SingleChildW):
 
     self.graphic = GraphWidget(self.video.box)
     self.graphic.key_cbs['Right'] = lambda _: self.next_frame()
+    self.graphic.key_cbs['Left'] = lambda _: self.prev_frame()
     self.graphic.key_cbs['G'] = lambda _: self.goto()
     vx = QtWidgets.QWidget()
     vx.setLayout(s2)
@@ -624,7 +696,6 @@ class VideoSource(SingleChildW):
     self.source = ImageIO()
 
     self.set_single_child(splitter)
-    self.frame_db = None
 
   def installEventFilter(self, ev):
     super().installEventFilter(ev)
@@ -638,6 +709,7 @@ class VideoSource(SingleChildW):
 
   def set_pos(self, rel, **kwargs):
     self.video.seek(rel, **kwargs)
+    print('seeek', rel)
     frame = self.video.get_next()
     self.set_at_frame(frame)
 
@@ -655,22 +727,38 @@ class VideoSource(SingleChildW):
     self.set_pos(TimeSpec.MakeTS(ts))
 
   def set_at_frame(self, frame):
+    if frame is None: return
     p1 = time.perf_counter()
 
     td = datetime.timedelta(seconds=frame.time)
     self.text.setText(str(td))
 
     self.graphic.vctx.free_objs()
+    print('FUUU ', frame.rel)
     self.slider.set_nosig(frame.rel)
     self.graphic.vctx.remove_objs(self.cur_objs)
     self.cur_frame = frame
-    self.cur_objs = self.graphic.vctx.plot_meshes(cmisc.Attr(images=[frame.img]).objs)
+    self.cur_objs = self.graphic.vctx.plot_meshes(cmisc.Attr(images=[frame.img])).objs
+
+    if self.first:
+      self.first = False
+      self.graphic.vctx.set_viewbox()
+
     self.source.push(frame.img)
     p2 = time.perf_counter()
     #print('set took ', p2 - p1)
 
   def next_frame(self):
     self.set_at_frame(self.video.get_next())
+
+  def prev_frame(self):
+
+    id = self.frame_db.ts2id.get(self.cur_frame.ts, None)
+    if id is None:
+      return
+    ts = self.frame_db.id2ts.get(id - 1, None)
+    if ts is None: return
+    self.set_pos(TimeSpec.MakeTS(ts))
 
 
 def sink_graph():
@@ -688,7 +776,7 @@ def sink_graph():
     return i
 
   nsink = ImageIO(f=proc)
-  nsink._obj = gw
+  nsink.internal = gw
   return nsink
 
 
@@ -747,7 +835,6 @@ def timestamp_to_frame(timestamp, stream):
 def test_av(ctx):
   import av
   container = av.open(ctx.infile)
-  from av.video import VideoStream
 
   video_stream = next(s for s in container.streams if s.type == 'video')
   total_frame_count = 0

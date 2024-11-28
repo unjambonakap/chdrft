@@ -13,7 +13,7 @@ import chdrft.struct.base as opa_struct
 import cv2
 import chdrft.utils.geo as geo_utils
 import chdrft.sim.base as sim_base
-from chdrft.utils.math import *
+from chdrft.utils.omath import *
 
 global flags, cache
 flags = None

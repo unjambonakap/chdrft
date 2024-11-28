@@ -8,7 +8,7 @@ import chdrft.utils.misc as cmisc
 from chdrft.utils.misc import Attributize as A
 import glog
 import numpy as np
-from chdrft.utils.types import *
+from chdrft.utils.opa_types import *
 from pydantic.v1 import Field
 from chdrft.utils.path import FileFormatHelper
 import chdrft.sim.rb.rb_gen as rb_gen
@@ -104,7 +104,7 @@ class GZRunner(cmisc.PatchedModel):
   server: sim7.Server = None
   node: Node = None
   callbacks: dict[GZCallbackMode,
-                  list] = Field(default_factory=lambda: cmisc.defaultdict(list))
+                  list] = cmisc.pyd_f(lambda: cmisc.defaultdict(list))
 
   def set_debug(self):
     set_verbosity(4)
@@ -245,11 +245,11 @@ class StatEntry(cmisc.PatchedModel):
 
 
 class StatsGatherer(cmisc.PatchedModel):
-  records: list[dict[str, object]] = Field(default_factory=list)
+  records: list[dict[str, object]] = cmisc.pyd_f(list)
   requests: list[StatRequest]
   iter_downsample: int = 1
   active_record: dict = None
-  connector: ImageIO = Field(default_factory=ImageIO)
+  connector: ImageIO = cmisc.pyd_f(ImageIO)
 
   def register(self, runner: GZRunner):
     runner.callbacks[GZCallbackMode.PRE0].append(self.record)

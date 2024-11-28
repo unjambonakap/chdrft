@@ -5,22 +5,14 @@ from chdrft.main import app
 from chdrft.utils.cmdify import ActionHandler
 from chdrft.utils.misc import Attributize
 from chdrft.utils.misc import Attributize as A
-import chdrft.utils.misc as cmisc
-import glog
-import math, sys, os
 import numpy as np
-from chdrft.utils.types import *
 from enum import Enum
-from chdrft.utils.path import FileFormatHelper
-from chdrft.utils.fmt import Format
 import chdrft.display.grid as grid
 from chdrft.dsp.datafile import Dataset
 from chdrft.display.ui import PlotEntry, OpaPlot, MetricWidget
-from chdrft.dsp.image import ImageData
 import chdrft.display.video_helper as vh
-from rx import operators as ops
+import reactivex.operators as ops
 from chdrft.config.env import g_env
-from vispy.plot import Fig
 
 global flags, cache
 flags = None
@@ -51,17 +43,17 @@ class PlotService:
   def __init__(self):
     self.windows = []
   def setup(self):
-    grid.create_app()
+    g_env.create_app()
 
-  def create_window(self, **kwargs):
-    grid.create_app()
+  def create_window(self, **kwargs) -> grid.GridWidgetHelper:
+    g_env.create_app()
     gwh = grid.GridWidgetHelper(**kwargs)
     gwh.win.closed.pipe(ops.filter(lambda x: x == True)
                        ).subscribe(lambda _: self.windows.remove(gwh))
     self.windows.append(gwh)
     return gwh
 
-  def find_window(self):
+  def find_window(self) -> grid.GridWidgetHelper | None:
     if not self.windows: return None
     return self.windows[-1]
 

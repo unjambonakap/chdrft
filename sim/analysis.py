@@ -6,9 +6,6 @@ from chdrft.cmds import CmdsList
 from chdrft.main import app
 from chdrft.utils.cmdify import ActionHandler
 from chdrft.utils.misc import Attributize
-import chdrft.utils.misc as cmisc
-import glog
-import chdrft.utils.Z as Z
 import calcephpy
 from astroquery.jplhorizons import Horizons
 from chdrft.display.vtk import vtk_main_obj

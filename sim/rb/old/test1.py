@@ -9,14 +9,14 @@ from chdrft.utils.misc import Attributize as A
 import chdrft.utils.misc as cmisc
 import glog
 import numpy as np
-from chdrft.utils.types import *
+from chdrft.utils.opa_types import *
 from pydantic.v1 import BaseModel, Field
 from typing import Tuple
 import xarray as xr
 from typing import Callable, List
 from scipy.spatial.transform import Rotation as R
 from chdrft.display.base import TriangleActorBase
-from chdrft.utils.math import MatHelper
+from chdrft.utils.omath import MatHelper
 import itertools
 from enum import Enum
 import functools

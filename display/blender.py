@@ -1,21 +1,17 @@
 #!/usr/bin/env python
 
 from __future__ import annotations
-from bpy_extras.image_utils import load_image
 from bpy_extras.node_shader_utils import PrincipledBSDFWrapper
 from chdrft.cmds import CmdsList
 from chdrft.display.base import TriangleActorBase
-from chdrft.dsp.image import ImageData
 from chdrft.main import app
 from chdrft.utils.cmdify import ActionHandler
 from chdrft.utils.misc import Attributize as A
-from chdrft.utils.types import *
-from chdrft.sim.rb.base import Vec3, Transform, AABB
+from chdrft.sim.rb.base import Transform, AABB
 from scipy.spatial.transform import Rotation as R
 import bpy
 import chdrft.utils.misc as cmisc
 import cv2
-import glog
 import numpy as np
 import tempfile
 import chdrft.utils.geo as geo_utils

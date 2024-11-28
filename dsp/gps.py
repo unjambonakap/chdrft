@@ -5,11 +5,10 @@ from chdrft.main import app
 from chdrft.utils.cmdify import ActionHandler
 from chdrft.utils.misc import Attributize
 import chdrft.utils.misc as cmisc
-import glog
 import chdrft.utils.Z as Z
 import chdrft.utils.K as K
 import numpy as np
-from chdrft.dsp.base import SignalBuilder, PulsedSignalBuilder, OpaXpsk
+from chdrft.dsp.base import SignalBuilder, OpaXpsk
 import chdrft.dsp.base as opa_dsp_base
 
 global flags, cache
@@ -775,7 +774,7 @@ def proc_ds(
   conf.update(kwargs)
 
   from gnuradio.filter import firdes
-  from gnuradio import gr, blocks, filter
+  from gnuradio import filter
 
   taps = firdes.low_pass(
       1.0, orig_sample_rate, bpsk_rate * 1.1, bpsk_rate * 0.5, firdes.WIN_HAMMING, 6.76

@@ -1,22 +1,15 @@
 #!/usr/bin/env python
 
-import chdrft.config.env
 from chdrft.cmds import CmdsList
 from chdrft.main import app
 from chdrft.utils.cmdify import ActionHandler
 from chdrft.utils.misc import Attributize
-import chdrft.utils.misc as cmisc
 from chdrft.utils.misc import Attributize as A
-import glog
 import numpy as np
-from chdrft.utils.types import *
-from pydantic.v1 import Field
-from chdrft.utils.path import FileFormatHelper
-from chdrft.utils.fmt import Format
+from chdrft.utils.opa_types import *
 from chdrft.sim.rb.rb_gen import *
 from chdrft.sim.rb.ctrl import *
 from chdrft.sim.rb.scenes import *
-import pygmo as pg
 from IPython import embed
 
 global flags, cache

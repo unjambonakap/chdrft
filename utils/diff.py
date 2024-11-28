@@ -4,8 +4,6 @@ from chdrft.cmds import CmdsList
 from chdrft.main import app
 from chdrft.utils.cmdify import ActionHandler
 from chdrft.utils.misc import Attributize
-import chdrft.utils.misc as cmisc
-import glog
 import yaml
 import pprint
 
@@ -51,7 +49,6 @@ def proc(ctx, file1, file2):
 
   except:
     print('Got diff')
-    pass
 
 def test(ctx):
   proc(ctx, ctx.file[0], ctx.file[1])

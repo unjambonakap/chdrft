@@ -11,8 +11,6 @@ init_jupyter()
 
 
 import bpy
-import sys
-import traceback as tb
 import addon_utils
 from mathutils import Matrix
 from chdrft.display.blender import clear_scene

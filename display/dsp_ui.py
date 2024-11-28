@@ -1,16 +1,9 @@
-import sys
 from chdrft.config.env import qt_imports
-import numpy as np
 import pyqtgraph as pg
-import scipy.ndimage as ndimage
-from scipy import signal
 import glog
-import pandas as pd
 
-from chdrft.utils.misc import to_list, Attributize, proc_path
-from chdrft.utils.colors import ColorPool
+from chdrft.utils.misc import to_list
 from chdrft.utils.fmt import fmt
-from asq.initiators import query as asq_query
 from chdrft.display.utils import *
 import chdrft.dsp.line as dsp_line
 

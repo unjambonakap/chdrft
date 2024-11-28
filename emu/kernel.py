@@ -5,7 +5,7 @@ from chdrft.emu.elf import ElfUtils, MEM_FLAGS
 from chdrft.emu.structures import Structure, MemBufAccessor
 from chdrft.emu.binary import norm_arch
 from chdrft.emu.trace import Tracer, Display, WatchedMem, WatchedRegs
-from chdrft.utils.opa_math import rotlu32, modu32
+from chdrft.utils.omath import rotlu32, modu32
 from chdrft.utils.misc import cwdpath, Attributize, Arch, opa_print, to_list, lowercase_norm
 import chdrft.utils.misc as cmisc
 import unicorn as uc

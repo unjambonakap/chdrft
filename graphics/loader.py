@@ -4,7 +4,6 @@ from chdrft.cmds import CmdsList
 from chdrft.main import app
 from chdrft.utils.cmdify import ActionHandler
 from chdrft.utils.misc import Attributize, read_file_or_buf
-import glog
 from chdrft.utils.parser import BufferParser
 import stl #numpy-stl
 

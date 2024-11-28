@@ -1,11 +1,8 @@
 #!/usr/bin/env python
 
-from astroquery.jplhorizons import Horizons
 from chdrft.cmds import CmdsList
 from chdrft.cmds import CmdsList
 from chdrft.display.base import TriangleActorBase
-from chdrft.display.vtk import vtk_main_obj
-from chdrft.geo.satsim import TileGetter
 from chdrft.main import app
 from chdrft.main import app
 from chdrft.sim.base import *
@@ -15,15 +12,12 @@ from chdrft.utils.cmdify import ActionHandler
 from chdrft.utils.cmdify import ActionHandler
 from chdrft.utils.misc import Attributize
 from chdrft.utils.misc import Attributize
-from chdrft.utils.types import *
-import calcephpy
+from chdrft.utils.opa_types import *
 import chdrft.display.vtk as opa_vtk
 import chdrft.utils.Z as Z
 import chdrft.utils.misc as cmisc
 import chdrft.utils.misc as cmisc
 import cv2
-import glog
-import glog
 import meshio
 import numpy as np
 import numpy as np
@@ -181,7 +175,6 @@ class MoonSunrise:
         mat = mat @ Z.opa_math.MatHelper.mat_rot(
             R.from_rotvec(np.array([0, 0, 1]) * -self.ctx.rot_angle)
         )
-      pass
     return mat
 
   @property
@@ -225,7 +218,7 @@ class MoonSunrise:
   def create_moon_actor(self):
     ta = None
     moon_model = self.ctx.moon_model
-    if not moon_model: return None
+    if not moon_model: return A(obj=None, internal=None)
 
     if moon_model == 'pic':
       tex = cv2.imread('/home/benoit/programmation/chdrft/sim/Moon_LRO_LOLA_global_LDEM_1024.jpg')

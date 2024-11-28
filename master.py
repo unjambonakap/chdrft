@@ -69,6 +69,7 @@ def args(parser):
     Cmds.add(func=fcf_to_csv, args=[cwdpath])
     Cmds.add(func=fcf_to_array, args=[cwdpath])
     import chdrft.conv.utils
+    Cmds.add(func=chdrft.conv.utils.read_bson, args=[cwdpath])
 
 
     import chdrft.graphics.loader as graphics_loader

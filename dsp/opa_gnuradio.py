@@ -5,7 +5,6 @@ from chdrft.main import app
 from chdrft.utils.cmdify import ActionHandler
 from chdrft.utils.misc import Attributize
 from chdrft.utils.fmt import Format
-from chdrft.utils.arg_gram import LazyConf
 import re
 import tempfile
 import glog

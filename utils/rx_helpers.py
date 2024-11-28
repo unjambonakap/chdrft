@@ -1,30 +1,30 @@
 #!/usr/bin/env python
 
+from chdrft.config.env import g_env
 from chdrft.cmds import CmdsList
 from chdrft.main import app
 from chdrft.utils.cmdify import ActionHandler
-from chdrft.utils.misc import Attributize
 import chdrft.utils.misc as cmisc
 import numpy as np
 from chdrft.cmds import CmdsList
 from chdrft.main import app
 from chdrft.utils.cmdify import ActionHandler
 from chdrft.utils.misc import A
-from chdrft.utils.misc import Attributize
 import chdrft.utils.misc as cmisc
 import numpy as np
-import chdrft.display.vispy_utils as vispy_utils
+from chdrft.dsp.image import ImageData
 import sys
-import rx
-import rx.core
-import rx.subject
+import reactivex as rx
+from chdrft.config.env import qt_imports
+import glog
+
 from pydantic.v1 import Field
 from typing import ClassVar
 
 try:
   import av
 except:
-  print('failed to import av', file=sys.stderr)
+  print(f'failed to import av in {__file__}', file=sys.stderr)
 
 global flags, cache
 flags = None
@@ -47,6 +47,8 @@ class ImageIO(cmisc.PatchedModel):
   last_in: object = None
   res: object = None
   disposed: bool = False
+  internal: object = None
+  hint_size: object = None
 
   def dispose(self):
     if self.disposed: return
@@ -71,7 +73,7 @@ class ImageIO(cmisc.PatchedModel):
   def register_ctx(self, ctx):
     self._ctx = ctx
     for k, v in ctx.items():
-      if isinstance(v, rx.core.Observable):
+      if isinstance(v, rx.Observable):
         v.subscribe(lambda _: self.rerun())
 
   def rerun(self):
@@ -271,9 +273,9 @@ class ImageProcessor(ImageIO):
   def __call__(self, i):
     if i is None:
       return None
-    i = vispy_utils.ImageData.Make(i)
+    i = ImageData.Make(i)
     r = self.process(i)
-    return vispy_utils.ImageData.Make(r)
+    return ImageData.Make(r)
 
   def chain(self, other):
     return ChainedImageProcessor([self, other])
@@ -338,7 +340,7 @@ class FuncCtxImageProcessor(FuncImageProcessor):
   def get_ctx(self):
     res = A()
     for k, v in self.ctx.items():
-      if isinstance(v, rx.core.Observable):
+      if isinstance(v, rx.Observable):
         v = v.value
       res[k] = v
     return res
@@ -348,7 +350,72 @@ class FuncCtxImageProcessor(FuncImageProcessor):
 
 
 kIdImageProc = FuncImageProcessor(f=lambda x: x)
+kErrObj = object()
 
+if not g_env.slim:
+  class QtSig(qt_imports.QtCore.QObject):
+    obj = qt_imports.QtCore.pyqtSignal(object)
+
+class WrapRX:
+
+  def __init__(self, obj):
+    self.obj = obj
+    self.value = None
+
+  def __getattr__(self, name):
+    if hasattr(self.obj, name): return getattr(self.obj, name)
+    a = getattr(rx.operators, name, None)
+    if a is None:
+      if name.endswith('_safe'):
+        a = getattr(rx.operators, name[:-5], None)
+        if a is None:
+          raise AttributeError(name)
+
+        def wrap_f(f, *args, **kwargs):
+
+          @cmisc.logged_failsafe
+          def fsafe(*args, **kwargs):
+            try:
+              return f(*args, **kwargs)
+            except:
+              cmisc.tb.print_exc()
+              return kErrObj
+
+          return WrapRX(
+              self.obj.pipe(
+                  a(fsafe, *args, **kwargs), rx.operators.filter(lambda x: x is not kErrObj)
+              )
+          )
+
+        return wrap_f
+
+      else:
+        raise AttributeError(name)
+
+    def wrap(*args, **kwargs):
+      return WrapRX(self.obj.pipe(a(*args, **kwargs)))
+
+    return wrap
+
+  def set_value(self, x):
+    self.value = x
+
+  def subscribe_safe(self, f, qt_sig=False, **subscribe_kwargs):
+
+    @cmisc.logged_failsafe
+    def call(*args, **kwargs):
+      return f(*args, **kwargs)
+
+    if qt_sig:
+      sig = QtSig()
+      sig.obj.connect(call)
+      self.subscribe(on_next=lambda x: sig.obj.emit(x), on_error=glog.exception, **subscribe_kwargs)
+    else:
+      self.subscribe(on_next=call, on_error=glog.exception, **subscribe_kwargs)
+
+  def listen_value(self):
+    self.subscribe_safe(self.set_value)
+    return self
 
 def jupyter_print(x):
   from IPython.display import clear_output
@@ -361,7 +428,7 @@ def test(ctx):
 
 
 def main():
-  ctx = Attributize()
+  ctx = A()
   ActionHandler.Run(ctx)
 
 

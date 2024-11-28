@@ -9,7 +9,7 @@ import chdrft.utils.misc as cmisc
 import glog
 import math, sys, os
 import numpy as np
-from chdrft.utils.types import *
+from chdrft.utils.opa_types import *
 from enum import Enum
 from chdrft.utils.path import FileFormatHelper
 from chdrft.utils.fmt import Format

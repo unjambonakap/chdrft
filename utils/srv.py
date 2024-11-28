@@ -4,13 +4,10 @@ from chdrft.cmds import CmdsList
 from chdrft.main import app
 from chdrft.utils.cmdify import ActionHandler
 from chdrft.utils.misc import Attributize
-import chdrft.utils.misc as cmisc
-import glog
 import chdrft.utils.Z as Z
 
 import tornado.web
 import tornado.httpserver
-from tornado import ioloop, gen
 import asyncio
 
 global flags, cache
@@ -68,7 +65,6 @@ def test(ctx):
       Z.time.sleep(0.5)
   except KeyboardInterrupt:
     print('Finish')
-    pass
 
   x.stop()
 

@@ -1,5 +1,4 @@
 #!/usr/bin/env python
-import sys
 
 from asq.initiators import query as q
 from chdrft.cmds import CmdsList
@@ -8,7 +7,7 @@ from chdrft.dsp.image import ImageData
 from chdrft.graphics.helper import stl_to_meshdata
 from chdrft.graphics.loader import stl_parser
 from chdrft.main import app
-from chdrft.struct.base import Box, Range2D, g_unit_box
+from chdrft.struct.base import Box
 from chdrft.struct.geo import QuadTree
 from chdrft.utils.cmdify import ActionHandler
 from chdrft.utils.misc import Attributize, flatten, A
@@ -21,27 +20,25 @@ from vispy.scene.cameras import TurntableCamera, PanZoomCamera
 from vispy.scene.visuals import Markers, Text
 from vispy.scene.visuals import Mesh, Line, Isocurve, Image, Rectangle
 from vispy.visuals import transforms
-from vispy.visuals.collections import PointCollection
 from vispy.visuals.filters import Alpha
 import chdrft.dsp.datafile as Dataset2d
-import chdrft.utils.geo as geo_utils
 import chdrft.utils.misc as cmisc
 import matplotlib.pyplot as plt
 import numpy as np
 import numpy.random
 import pprint
-import rx.subject
-import skimage.transform
-import time
+import reactivex as rx
 import vispy, vispy.app, vispy.scene, vispy.visuals
 import vispy.scene.visuals as vispy_visuals
 import vispy.util.keys as vispy_keys
 from chdrft.display.vispy_patch_arcball import ArcballCamera
+import chdrft.utils.colors as ocolors
 
 POINTS_FROM_LINE_MARKER = 'fromlines'
 kLineKeyword = 'lines'
 kPointKeyword = 'points'
 kImageKeyword = 'images'
+kTextKeyword = 'text'
 
 inv_color = Color(alpha=0)
 
@@ -56,7 +53,6 @@ mathgame = None
 common = None
 tc = None
 fc = None
-import glog
 
 global flags, cache
 flags = None
@@ -69,7 +65,6 @@ def vec_pos_to_list(vecpos):
 
 def init(ctx):
   if not ctx.noopa:
-    from opa.math.game.proto import common_pb2
     global mathgame, common, tc, fc
     mathgame = swig.opa_math_game_swig
     common = swig.opa_common_swig
@@ -328,9 +323,10 @@ class VispyCtx:
 
   def do_query(self, pos, ev=None):
     res = self.qtree.query(geometry.Point(list(pos)), k=5)
+    u2pix = np.min(np.array(self.view.size / self.vb.dim))
 
     if res is None: cnds = []
-    else: cnds = [e for e in res.kbest if e.score < 1e-9]
+    else: cnds = [e for e in res.kbest if e.score * u2pix < 10 ]
     return cmisc.A(pos=pos, cnds=cnds, ev=ev, vctx=self)
 
   @cmisc.logged_failsafe
@@ -494,6 +490,8 @@ def norm_color(color):
   if isinstance(color, str) and color == 'random':
     color = np.random.random(3).tolist()
   else:
+    if not isinstance(color, str):
+      color = ocolors.ColorConv.to_rgb(color, as_float=True)
     color = Color(color).rgb.tolist()
   return color
 
@@ -651,6 +649,7 @@ def add_mesh_data_to_view(
         if 'alpha' in image.data: alpha = image.data['alpha']
 
         image_data = image.img
+
         if not image.yx: image_data = image_data.T
         height, width = image_data.shape[:2]
         image_transform = transforms.STTransform(
@@ -707,14 +706,16 @@ def add_mesh_data_to_view(
     #print('PLOTTING ', points, points_size)
     if len(points) > 0:
       scatter = Markers(scaling=False)
-      scatter.set_data(
-          points, edge_color=points_color, face_color=points_color, size=points_size
-      )
+      scatter.set_data(points, edge_color=points_color, face_color=points_color, size=points_size)
       scatter.transform = transform
       vb_points = Box.FromPoints(points[:, :2])
       res.objs.append(cmisc.Attr(vispy=scatter, data=points_data))
       boxes.append(vb_points)
       res.points = scatter
+
+  for text in mdata.get(kTextKeyword, []):
+    res.objs.append(A(vispy=Text(pos=text.pos, text=text.text), data=text))
+
   for misc in mdata.get('misc', []):
     item = misc
     curparams = A(color=color)
@@ -738,6 +739,11 @@ def add_mesh_data_to_view(
 
   for ctx_obj in mdata.get('ctx_objs', []):
     res.objs.append(ctx_obj)
+
+  if (fromobj:=mdata.get('fromobj')) is not None:
+    for e in res.objs:
+      e.fromobj = fromobj
+
 
   res.box = Box.Union(boxes)
   if view is not None:
@@ -915,7 +921,6 @@ def test2(ctx):
   #t =swig.opa_math_common_swig.bignum()
   #print(t)
   #tmp = swig.opa_common_swig
-  pass
 
 
 def best_box(ctx):
@@ -1347,7 +1352,7 @@ def meshlist_to_openscad(ctx):
 
 
 def make_qtree_obj(obj):
-  fromobj = obj.data
+  fromobj = obj.get('fromobj', obj.data)
   res = A(ctxobj=obj, obj=fromobj)
   if isinstance(fromobj, Box):
     geo = fromobj.shapely

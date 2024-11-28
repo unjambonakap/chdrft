@@ -1,5 +1,6 @@
 #!/usr/bin/env python
 
+from __future__ import annotations
 from enum import Enum
 from chdrft.main import app
 from chdrft.tube.serial import Serial
@@ -14,14 +15,16 @@ from chdrft.tube.tube import TubeWrapper
 
 class I2CConLine:
 
-  def __init__(self, conn, addr):
+  def __init__(self, conn: I2CCon, addr: int):
     self.conn = conn
     self.addr = addr
 
   def get_wrapper(self):
     return TubeWrapper(
         send=lambda data: self.conn.i2c_con_send(self.addr, data),
-        recv=lambda n, timeout: self.conn.i2c_con_recv(self.addr, n, timeout))
+        recv=lambda n, timeout: self.conn.i2c_con_recv(self.addr, n, timeout),
+      enter=self.conn.__enter__
+    )
 
 class I2CCon(ExitStack):
 
@@ -54,15 +57,14 @@ class I2CCon(ExitStack):
     self.mode.action_i2c_write(addr, data)
 
   def i2c_con_recv(self, addr, n, timeout):
-    print(self)
-    print(self.mode, addr)
     while True:
       avail=self.mode.action_i2c_read(addr, 1)
       assert avail is not None
-      if avail==0:
+      if avail[0]==0:
         time.sleep(1e-3)
         continue
+      print(avail, n)
       avail=min(avail, n)
-      res=self.mode.action_i2c_read(addr, avail+1)
+      res = self.mode.action_i2c_read(addr, avail+1)
       return res[1:]
 

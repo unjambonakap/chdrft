@@ -1,13 +1,8 @@
 import argparse
-import jsonpickle
 import chdrft.utils.misc as cmisc
 import os
-import sys
 import shutil
 import traceback as tb
-import hashlib
-import fnmatch
-import pickle
 import glog
 from chdrft.utils.path import FileFormatHelper
 
@@ -17,15 +12,26 @@ global_cache_list = []
 
 global_fileless_cache = None
 
+default_cache_filename = '.chdrft.cache.pickle'
+
+def get_default_cache_filename():
+  return os.path.join(os.environ.get('OPA_CACHE_DIR', cmisc.cwdpath('./')), default_cache_filename)
+
 
 def dump_caches():
   print('DUMP CACHES')
   for x in global_cache_list:
     x.do_exit_entry()
 
+def enabled_cache():
+  from chdrft.main import app
+  return app.flags and app.flags.enable_cache
+
+def update_cache():
+  from chdrft.main import app
+  return app.flags and app.flags.enable_cache and not app.flags.no_update_cache
 
 class CacheDB(object):
-  default_cache_filename = '.chdrft.cache.pickle'
   default_conf = 'default'
 
   def __getstate__(self):
@@ -35,8 +41,6 @@ class CacheDB(object):
     pass
 
   def __init__(self, conf=None, recompute_set=set()):
-    global global_cache
-    global_cache = self
 
     if not conf:
       conf = self.default_conf
@@ -152,20 +156,19 @@ class FileCacheDB(CacheDB):
     self._ro = ro
 
     if not filename:
-      filename = self.default_cache_filename
+      filename = get_default_cache_filename()
     self._cache_filename = filename
 
   def write_cache(self, content):
     from chdrft.main import app
     if self._ro: return
-    if app.flags and app.flags.disable_cache: return
+    if app.flags and not app.flags.enable_cache: return
     glog.info('Writing cache ')
 
     FileFormatHelper.Write(self._cache_filename, content, default_mode='pickle')
     glog.info('Done Writing cache ')
 
   def read_cache(self, f):
-    from chdrft.main import app
     glog.info('Reading cache ')
     res = FileFormatHelper.Read(self._cache_filename, default_mode='pickle')
     glog.info('Done reading cache ')
@@ -177,8 +180,7 @@ class FileCacheDB(CacheDB):
 
       self.write_cache({})
 
-    from chdrft.main import app
-    if app.flags and app.flags.disable_cache:
+    if not enabled_cache():
       cache = {}
     else:
       with open(self._cache_filename, 'rb') as f:
@@ -190,8 +192,7 @@ class FileCacheDB(CacheDB):
 
   def flush_cache(self):
 
-    from chdrft.main import app
-    if app.flags and (app.flags.disable_cache or app.flags.no_update_cache): return
+    if not update_cache(): return
     bak = self._cache_filename + '.bak'
     shutil.copy2(self._cache_filename, bak)
 
@@ -229,7 +230,7 @@ class Cachable:
 
   def __init__(self, cache=None):
     if not cache:
-      cache = global_cache
+      cache = Cachable.GetCache(fileless=False)
     if cache:
       setattr(self, Cachable.ATTR, cache)
 
@@ -334,7 +335,7 @@ class Cachable:
         if isinstance(self, Cachable):
           cache = self._cachable_get_cache()
         if cache is None:
-          cache = global_cache
+          cache = Cachable.GetCache(fileless=False)
 
         return Cachable.proc_cached(
             cache, key, f, args, kwargs, self=self, opa_fields=fields, opa_fullkey=fullkey
@@ -355,6 +356,11 @@ class Cachable:
         app.global_context.enter_context(global_fileless_cache)
       cache = global_fileless_cache
     else:
+      global global_cache
+      if global_cache is None:
+        global_cache = FileCacheDB()
+        from chdrft.main import app
+        app.global_context.enter_context(global_cache)
       cache = global_cache
     return cache
 
@@ -463,11 +469,11 @@ class Proxifier:
 def cache_argparse(parser):
   parser.add_argument('--cache-conf', type=str, default=CacheDB.default_conf)
   parser.add_argument(
-      '--cache-file', type=cmisc.cwdpath, default=cmisc.cwdpath(CacheDB.default_cache_filename)
+      '--cache-file', type=cmisc.cwdpath, default=get_default_cache_filename()
   )
   parser.add_argument('--recompute-all', action='store_true')
   parser.add_argument('--recompute', type=lambda x: x.split(','), default=[])
-  parser.add_argument('--disable-cache', action='store_true')
+  parser.add_argument('--enable-cache', action='store_true')
   parser.add_argument('--no-update-cache', action='store_true')
 
 

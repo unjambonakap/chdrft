@@ -1,33 +1,23 @@
 #!/usr/bin/env python
 
 from __future__ import annotations
-from typing import Tuple, Optional, TYPE_CHECKING
-from dataclasses import dataclass
+from typing import Tuple, TYPE_CHECKING
 from chdrft.cmds import CmdsList
-from chdrft.main import app
 from chdrft.utils.cmdify import ActionHandler
 from chdrft.utils.misc import Attributize as A
 import chdrft.utils.misc as cmisc
-import glog
 import numpy as np
-from chdrft.utils.types import *
-from pydantic.v1 import BaseModel, Field
+from chdrft.utils.opa_types import *
+from pydantic.v1 import BaseModel
 from typing import Tuple
-import xarray as xr
-from typing import Callable, List
 from scipy.spatial.transform import Rotation as R
 from chdrft.display.base import TriangleActorBase
-from chdrft.utils.math import MatHelper
+from chdrft.utils.omath import as_pts3
 import itertools
 import enum
-import functools
 import sympy as sp
 import jax.numpy as jnp
-import jaxlib
 import jax
-import pygmo as pg
-from chdrft.utils.fmt import Format
-from chdrft.utils.path import FileFormatHelper
 
 if TYPE_CHECKING:
   from chdrft.sim.rb.spatial_vectors import SpatialVector
@@ -65,23 +55,6 @@ def make_array(x, type_hint=None):
   return g_oph.array(x, _oph_type_hint=type_hint)
 
 
-def norm_pts(x):
-  if len(x.shape) == 1:
-    return x / x[3]
-  return x / x[:, (3,)]
-
-
-def as_pts3(x):
-  if x.shape[-1] == 3:
-    return x
-  return norm_pts(x)[:, :3]
-
-
-def as_pts4(x):
-  if x.shape[-1] == 4:
-    return x
-  if len(x.shape) == 1: return Vec3.Vec(x).data
-  return np.concatenate((x, np.zeros(x.shape[:-1] + (1,))), axis=len(x.shape) - 1)
 
 
 @jax.custom_jvp
@@ -812,7 +785,7 @@ class Particles(cmisc.PatchedModel):
     lines = np.stack((pts, pts + self.v[:, :3] * fx), axis=2)
     lines = np.transpose(lines, (0, 2, 1))
     points_color = []
-    from chdrft.display.service import g_plot_service, grid
+    from chdrft.display.service import g_plot_service
     data = A(points=pts, lines=lines, conf=A(mode='3D'))
     if by_col:
       from chdrft.utils.colors import ColorMapper
@@ -1096,7 +1069,7 @@ class SphereDesc(MeshDesc):
 
 class Inertial(cmisc.PatchedModel):
 
-  data: np.ndarray | jnp.ndarray = Field(default_factory=lambda: np.zeros((3, 3)))
+  data: np.ndarray | jnp.ndarray = cmisc.pyd_f(lambda: np.zeros((3, 3)))
   mass: float = 0
 
   def to_gz(self):
@@ -1188,9 +1161,9 @@ class SolidSpecType(enum.Enum):
 
 
 class SolidSpec(cmisc.PatchedModel):
-  com: Vec3 = Field(default_factory=Vec3.ZeroPt)
-  inertial: Inertial = Field(default_factory=Inertial)
-  mesh: MeshDesc = Field(default_factory=MeshDesc)
+  com: Vec3 = cmisc.pyd_f(Vec3.ZeroPt)
+  inertial: Inertial = cmisc.pyd_f(Inertial)
+  mesh: MeshDesc = cmisc.pyd_f(MeshDesc)
   type: SolidSpecType = SolidSpecType.OTHER
 
   def __init__(self, **kwargs):
@@ -1257,13 +1230,23 @@ class NumpyPackerEntry(cmisc.PatchedModel):
 
   @property
   def size(self) -> int:
-    return np.multiply.reduce(self.shape)
+    return int(np.multiply.reduce(self.shape))
+
+
+  @property
+  def as_slice(self):
+    return slice(self.pos, self.pos+self.size)
 
 
 class NumpyPacker(cmisc.PatchedModel):
 
-  tb: list[NumpyPackerEntry] = Field(default_factory=list)
+  tb: list[NumpyPackerEntry] = cmisc.pyd_f(list)
+  by_name: dict[str, NumpyPackerEntry] = cmisc.pyd_f(dict)
   pos: int = 0
+
+  def add_dict_like(self, **kwargs):
+    for k, v in kwargs.items():
+      self.add_like(k, v)
 
   def add_dict(self, **kwargs):
     for k, v in kwargs.items():
@@ -1273,10 +1256,14 @@ class NumpyPacker(cmisc.PatchedModel):
   def default(self) -> np.ndarray:
     return np.zeros(self.pos)
 
+  def add_like(self, name, v):
+    self.add(name, v.shape)
+
   def add(self, name, shape):
     if isinstance(shape, int): shape = (shape,)
     shape = np.array(shape)
     x = NumpyPackerEntry(name=name, pos=self.pos, shape=shape)
+    self.by_name[name] = x
     self.tb.append(x)
     self.pos += x.size
 

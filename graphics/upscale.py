@@ -6,15 +6,9 @@ from chdrft.utils.cmdify import ActionHandler
 from chdrft.utils.misc import Attributize
 import chdrft.utils.misc as cmisc
 from chdrft.utils.misc import Attributize as A
-import glog
 import chdrft.utils.Z as Z
 import chdrft.utils.K as K
 import numpy as np
-from pydantic.v1 import Field
-import pydantic.v1 as pydantic
-import contextlib
-import pickle
-import dataclasses
 import cv2
 from chdrft.graphics.upscale_colab import *
 
@@ -263,7 +257,6 @@ def test(ctx):
 
 
 def extract(ctx):
-  from chdrft.display.render import ImageGrid
   with CacheContext(ctx.context_path, ro=True) as cctx:
     with CacheContext(ctx.target_context_path) as tctx:
       tctx.data.clear()

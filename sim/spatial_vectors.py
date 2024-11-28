@@ -6,11 +6,8 @@ from chdrft.main import app
 from chdrft.utils.cmdify import ActionHandler
 import chdrft.utils.misc as cmisc
 from chdrft.utils.misc import Attributize as A
-import glog
 import numpy as np
-from chdrft.utils.types import *
-from pydantic.v1 import Field
-from chdrft.utils.path import FileFormatHelper
+from chdrft.utils.opa_types import *
 from chdrft.sim.rb.base import Vec3, Transform, Inertial, g_oph, np_array_like
 from enum import Enum
 
@@ -20,8 +17,8 @@ cache = None
 
 
 class SpatialVector(cmisc.PatchedModel):
-  v: Vec3 = Field(default_factory=Vec3.Zero, alias='f')
-  w: Vec3 = Field(default_factory=Vec3.Zero, alias='m')
+  v: Vec3 = cmisc.pyd_f(Vec3.Zero, alias='f')
+  w: Vec3 = cmisc.pyd_f(Vec3.Zero, alias='m')
   dual: bool
 
   def __repr__(self) -> str:

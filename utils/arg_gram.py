@@ -6,7 +6,6 @@ from chdrft.utils.cmdify import ActionHandler
 from chdrft.utils.misc import Attributize, get_n2_locals_and_globals
 
 
-import glog
 
 global flags, cache
 flags = None
@@ -19,7 +18,6 @@ def args(parser):
   ActionHandler.Prepare(parser, clist.lst)
 
 
-import decimal
 
 
 class ConfParser:
@@ -216,7 +214,6 @@ class LazyConf(Attributize):
 
   def __add_key(self, key, val):
     self._has = True
-    pass
 
   def _merge(self, other_conf):
     assert isinstance(other_conf, LazyConf), 'Typ is %s, val=%s' % (type(other_conf), other_conf)

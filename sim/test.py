@@ -2,19 +2,15 @@
 
 import chdrft.utils.K as K
 import numpy as np
-from astropy import units as u
 from chdrft.sim.base import create_earth_actors, Box
 from chdrft.display.vtk import TriangleActorVTK
 from chdrft.cmds import CmdsList
 from chdrft.main import app
 from chdrft.utils.cmdify import ActionHandler
 from chdrft.utils.misc import Attributize
-import chdrft.utils.misc as cmisc
 from chdrft.utils.misc import Attributize as A
-import glog
 import chdrft.utils.Z as Z
 import numpy as np
-from pydantic.v1 import Field
 from chdrft.geo.satsim import gl
 
 global flags, cache

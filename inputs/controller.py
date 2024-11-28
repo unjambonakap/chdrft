@@ -9,15 +9,16 @@ from chdrft.utils.misc import Attributize
 import chdrft.utils.misc as cmisc
 import glog
 import numpy as np
-from chdrft.utils.types import *
+from chdrft.utils.opa_types import *
 from chdrft.external.gamepad.controllers import Xbox360
 import chdrft.external.gamepad.gamepad as gamepad
 from chdrft.utils.rx_helpers import ImageIO
-from pydantic.v1 import Field
 from chdrft.utils.path import FileFormatHelper
 from chdrft.dsp.utils import linearize_clamp
 from typing import Callable
 import enum
+import time
+import contextlib
 
 global flags, cache
 flags = None
@@ -34,11 +35,24 @@ def args(parser):
   ActionHandler.Prepare(parser, clist.lst, global_action=1)
 
 
+class JoystickHelper:
+  @classmethod
+  def find_number(cls, typ: str) -> int:
+    assert typ == 'xbox360'
+    for group in FileFormatHelper.Read('/proc/bus/input/devices', mode='txt').split('\n\n'):
+      if 'Name="Microsoft X-Box 360 pad"' in group:
+        return int(cmisc.re.search(r'Handlers=[^ ]+ js(?P<num>\d)', group).group('num'))
+
+    return None 
+
+
+
 class OGamepad(cmisc.PatchedModel):
   gp: gamepad.Gamepad = None
-  src: ImageIO = Field(default_factory=ImageIO)
-  state_src: ImageIO = Field(default_factory=ImageIO)
-  state: dict = Field(default_factory=dict)
+  src: ImageIO = cmisc.pyd_f(ImageIO)
+  state_src: ImageIO = cmisc.pyd_f(ImageIO)
+  state: dict = cmisc.pyd_f(dict)
+  prev_state: dict = None
   axis2button: dict = None
 
   def register_button(self, name):
@@ -49,8 +63,12 @@ class OGamepad(cmisc.PatchedModel):
   def set_led(self, value):
     FileFormatHelper.Write('/sys/class/leds/xpad0/brightness', str(value))
 
-  def __init__(self, num=0):
+  def __init__(self, num=-1):
     super().__init__()
+    if num == -1:
+      num = JoystickHelper.find_number('xbox360')
+      assert num is not None
+
     self.gp: Gamepad = Xbox360(num)
     self.axis2button = {
         'DPAD-X': {
@@ -93,6 +111,9 @@ class OGamepad(cmisc.PatchedModel):
       self.state[(name, pressed)] = True
 
     self.src.push(A(name=name, val=val, pressed=pressed))
+    if self.prev_state is None:
+      self.prev_state = self.state
+
     self.push_state()
     if val is None:
       self.state[(name, pressed)] = False
@@ -101,7 +122,12 @@ class OGamepad(cmisc.PatchedModel):
     self.state_src.push(dict(self.state))
 
   def start(self):
-    self.gp.startBackgroundUpdates()
+    self.gp.startBackgroundUpdates(waitForReady=True)
+    for k, v in self.gp.axisMap.items():
+      self.cb(self.gp.axisNames[k], val=v)
+    for k, v in self.gp.pressedMap.items():
+      self.cb(self.gp.buttonNames[k], pressed=v)
+
     self.push_state()
 
   def dispose(self):
@@ -111,13 +137,13 @@ class OGamepad(cmisc.PatchedModel):
 
 
 class InputControllerParameters(cmisc.PatchedModel):
-  map: Callable[[int], int] = Field(default_factory=lambda: cmisc.identity)
-  controller2ctrl: Callable[[SceneControllerInput], np.ndarray]
+  map: Callable[[int], int] = cmisc.pyd_f(lambda: cmisc.identity)
+  controller2ctrl: Callable[[SceneControllerInput], np.ndarray] = None
 
 
 class SceneControllerInput(cmisc.PatchedModel):
-  inputs: dict[int, float] = Field(default_factory=lambda: cmisc.defaultdict(float))
-  parameters: InputControllerParameters = Field(default_factory=InputControllerParameters)
+  inputs: dict[int, float] = cmisc.pyd_f(lambda: cmisc.defaultdict(float))
+  parameters: InputControllerParameters = cmisc.pyd_f(InputControllerParameters)
   speed: float = 1
   scale: float = 1
   stop: bool = False
@@ -128,6 +154,7 @@ class SceneControllerInput(cmisc.PatchedModel):
   mod1: bool = False
   mod2: bool = False
   mod3: bool = False
+  cur_buttons: dict = None
 
   @property
   def scaled_ctrl(self) -> dict[int, float]:
@@ -145,8 +172,15 @@ class SceneControllerInput(cmisc.PatchedModel):
     return self.scaled_ctrl_packed
 
   def set(self, x, v):
-    v = cmisc.sign(v) * linearize_clamp(abs(v), 0.1, 1, 0, 1)
+    if isinstance(v, float):
+      v = cmisc.sign(v) * linearize_clamp(abs(v), 0.1, 1, 0, 1)
     self.inputs[self.parameters.map(x)] = v
+
+  def inc(self, x):
+    self.inputs[self.parameters.map(x)] += 1
+
+  def get(self, x):
+    return self.inputs[self.parameters.map(x)]
 
   def update_speed(self, ns: float):
     self.speed = max(ns, 0)
@@ -158,6 +192,60 @@ def jupyter_print(x):
   from IPython.display import clear_output
   clear_output()
   print(cmisc.json_dumps(x))
+
+
+@contextlib.contextmanager
+def configure_joy(gp: OGamepad, mp, init_dict={}):
+  cur = SceneControllerInput()
+
+  def proc(tb):
+    cur.cur_buttons =tb
+    for k, cb in mp.items():
+      if isinstance(k, tuple):
+        if isinstance(k[-1], bool):
+          if tb.get(k):
+            cb(cur)
+        else:
+          cb(cur, tuple(tb[x] for x in k))
+      else:
+        val = tb.get(k)
+        cb(cur, val)
+
+
+    return cur
+  cur.inputs.update(init_dict)
+
+  state= ImageIO(proc, last=cur)
+  gp.state_src.connect_to(state)
+  gp.start()
+  try:
+    yield state
+  finally:
+    gp.dispose()
+
+def debug_controller_state(state: ImageIO, cb_ser=lambda x: cmisc.json_dumps(x.inputs)):
+  import rich.live, rich.json
+  with rich.live.Live(refresh_per_second=10) as live:
+    while True:
+      live.update(rich.json.JSON(cb_ser(state.last)))
+      time.sleep(0.05)
+
+def test_controller(ctx):
+  mp = {
+      'LEFT-X': lambda s, v: s.set('yaw', v),
+      'RIGHT-Y': lambda s, v: s.set('pitch', v),
+      'LB': lambda s, v: s.set('LB', v),
+      'RB': lambda s, v: s.set('RB', v),
+      'DPAD-X': lambda s, v: s.set('dpad-x', v),
+      ('X', True): lambda s: s.inc('x_press_count'),
+      ('LB', 'RB'): lambda s, v: s.set('combo', v),
+  }
+
+  gp = OGamepad()
+  with configure_joy(gp, mp) as state:
+    state.last.inputs['x_press_count'] = 0
+    debug_controller_state(state)
+
 
 
 def test(ctx):

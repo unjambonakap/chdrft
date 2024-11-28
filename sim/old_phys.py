@@ -1,22 +1,18 @@
 #!/usr/bin/env python
 
 from typing import Tuple, Optional
-from dataclasses import dataclass
 from chdrft.cmds import CmdsList
 from chdrft.main import app
 from chdrft.utils.cmdify import ActionHandler
 from chdrft.utils.misc import Attributize as A
 import chdrft.utils.misc as cmisc
-import glog
 import numpy as np
-from chdrft.utils.types import *
+from chdrft.utils.opa_types import *
 from pydantic.v1 import BaseModel, Field
 from typing import Tuple
-import xarray as xr
-from typing import Callable, List
 from scipy.spatial.transform import Rotation as R
 from chdrft.display.base import TriangleActorBase
-from chdrft.utils.math import MatHelper
+from chdrft.utils.omath import MatHelper
 import itertools
 from enum import Enum
 import functools
@@ -467,7 +463,7 @@ class Particles(cmisc.PatchedModel):
     lines = np.hstack((self.p, self.p + self.v * fx))
     lines.resize((self.n, 2, 3))
     points_color = []
-    from chdrft.display.service import g_plot_service, grid
+    from chdrft.display.service import g_plot_service
     data = A(points=self.p, lines=lines, conf=A(mode='3D'))
     if by_col:
       from chdrft.utils.colors import ColorMapper
@@ -773,7 +769,7 @@ class MoveDesc(BaseModel):
 
 class InertialTensor(BaseModel):
 
-  data: np.ndarray = Field(default_factory=lambda: np.zeros((3, 3)))
+  data: np.ndarray = cmisc.pyd_f(lambda: np.zeros((3, 3)))
 
   class Config:
     arbitrary_types_allowed = True
@@ -840,9 +836,9 @@ class InertialTensor(BaseModel):
 
 class SolidSpec(cmisc.PatchedModel):
   mass: float = 0
-  com: Vec3 = Field(default_factory=Vec3.Zero)
-  inertial_tensor: InertialTensor = Field(default_factory=InertialTensor)
-  mesh: MeshDesc = Field(default_factory=MeshDesc)
+  com: Vec3 = cmisc.pyd_f(Vec3.Zero)
+  inertial_tensor: InertialTensor = cmisc.pyd_f(InertialTensor)
+  mesh: MeshDesc = cmisc.pyd_f(MeshDesc)
 
   @staticmethod
   def Point(mass):
@@ -897,10 +893,10 @@ class SolidSpec(cmisc.PatchedModel):
 
 class SceneContext(cmisc.PatchedModel):
   cur_id: int = 0
-  mp: dict = Field(default_factory=dict)
-  obj2name: "dict[RigidBody,str]" = Field(default_factory=dict)
-  name2obj: "dict[str,RigidBody]" = Field(default_factory=dict)
-  basename2lst: dict[str, list] = Field(default_factory=lambda: cmisc.defaultdict(list))
+  mp: dict = cmisc.pyd_f(dict)
+  obj2name: "dict[RigidBody,str]" = cmisc.pyd_f(dict)
+  name2obj: "dict[str,RigidBody]" = cmisc.pyd_f(dict)
+  basename2lst: dict[str, list] = cmisc.pyd_f(lambda: cmisc.defaultdict(list))
 
   def get_name(self, obj: "RigidBody") -> str:
     if not obj in self.obj2name:
@@ -934,7 +930,7 @@ class LinkData(cmisc.PatchedModel):
   pivot_rotaxis: Vec3 = None
   free: bool = False
   pivot_rotang: float = None
-  wl_free: Transform = Field(default_factory=Transform.From)
+  wl_free: Transform = cmisc.pyd_f(Transform.From)
 
 
   @property
@@ -948,9 +944,9 @@ class LinkData(cmisc.PatchedModel):
 
 
 class RigidBodyLink(cmisc.PatchedModel):
-  wl0: Transform = Field(default_factory=Transform.From)
-  move_desc: MoveDesc = Field(default_factory=MoveDesc)
-  link_data: LinkData = Field(default_factory=LinkData)
+  wl0: Transform = cmisc.pyd_f(Transform.From)
+  move_desc: MoveDesc = cmisc.pyd_f(MoveDesc)
+  link_data: LinkData = cmisc.pyd_f(LinkData)
   rb: "RigidBody"
 
   parent: "Optional[RigidBodyLink]" = Field(repr=False, default=None)
@@ -1149,10 +1145,10 @@ class RBData(cmisc.PatchedModel):
 
 
 class RigidBody(cmisc.PatchedModel):
-  spec: SolidSpec = Field(default_factory=SolidSpec)
-  data: RBData = Field(default_factory=RBData)
+  spec: SolidSpec = cmisc.pyd_f(SolidSpec)
+  data: RBData = cmisc.pyd_f(RBData)
   self_link: Optional[RigidBodyLink] = Field(repr=False, default=None)
-  move_links: list[RigidBodyLink] = Field(default_factory=list)
+  move_links: list[RigidBodyLink] = cmisc.pyd_f(list)
 
   ctx: SceneContext = Field(repr=False)
 
@@ -1296,18 +1292,18 @@ class RBBuilderEntry(cmisc.PatchedModel):
 
 
 class RBDescEntry(cmisc.PatchedModel):
-  data: RBData = Field(default_factory=RBData)
+  data: RBData = cmisc.pyd_f(RBData)
   spec: SolidSpec = None
   parent: "RBDescEntry" = None
-  wl: Transform = Field(default_factory=Transform.From)
-  link_data: LinkData = Field(default_factory=LinkData)
+  wl: Transform = cmisc.pyd_f(Transform.From)
+  link_data: LinkData = cmisc.pyd_f(LinkData)
   move_desc: MoveDesc = None
 
 
 class RBBuilderAcc(cmisc.PatchedModel):
-  entries: list[RBBuilderEntry] = Field(default_factory=list)
-  src_entries: list[RBDescEntry] = Field(default_factory=list)
-  dyn_links: list[RigidBodyLink] = Field(default_factory=list)
+  entries: list[RBBuilderEntry] = cmisc.pyd_f(list)
+  src_entries: list[RBDescEntry] = cmisc.pyd_f(list)
+  dyn_links: list[RigidBodyLink] = cmisc.pyd_f(list)
   sctx: SceneContext
 
   def build(self) -> RigidBody:
@@ -1343,11 +1339,11 @@ class RBBuilderAcc(cmisc.PatchedModel):
 
 
 class RBTree(cmisc.PatchedModel):
-  entries: list[RBDescEntry] = Field(default_factory=list)
+  entries: list[RBDescEntry] = cmisc.pyd_f(list)
   entry2child: dict[RBDescEntry,
-                    list[RBDescEntry]] = Field(default_factory=lambda: cmisc.defaultdict(list))
+                    list[RBDescEntry]] = cmisc.pyd_f(lambda: cmisc.defaultdict(list))
   child_links: dict[RBDescEntry,
-                    list[RigidBodyLink]] = Field(default_factory=lambda: cmisc.defaultdict(list))
+                    list[RigidBodyLink]] = cmisc.pyd_f(lambda: cmisc.defaultdict(list))
   sctx: SceneContext
 
   def add(self, entry: RBDescEntry) -> RBDescEntry:

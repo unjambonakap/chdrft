@@ -1,9 +1,7 @@
 #!/usr/bin/env python
 
-from PyQt5 import QtCore
 import os
 import chdrft.utils.misc as cmisc
-import jax
 import tempfile
 import numpy as np
 import random
@@ -11,34 +9,46 @@ import random
 g_pyqt4 = 'pyqt4'
 g_pyqt5 = 'pyqt5'
 g_environ_pyqt = 'QT_API'
+g_environ_nojax = 'OPA_NOJAX'
+g_environ_opa_slim = 'OPA_SLIM'
+kSlim = os.environ.get(g_environ_opa_slim, 0) == '1'
+kNoJax = os.environ.get(g_environ_nojax, 0) == '1' or kSlim
 
-
-def setup(app):
-  np.random.seed(0)
-  random.seed(0)
-  os.environ['SAGE_LOCAL'] = '/usr'
-  np.set_printoptions(edgeitems=10, linewidth=280)
-  np.set_printoptions(formatter={'int_kind': '{:},'.format, 'float_kind': '{:.07f},'.format})
-
-  jax_dump_dir = app.global_context.enter_context(tempfile.TemporaryDirectory())
-
-  os.environ[
-      "XLA_FLAGS"
-  ] = f'--xla_force_host_platform_device_count=16 --xla_embed_ir_in_executable --xla_dump_to={jax_dump_dir}'
-
+if not kNoJax:
   import jax
-  jax.config.update("jax_enable_x64", False)
 
+if not kSlim:
+  from PyQt5 import QtCore
 
 class Env:
 
   def __init__(self):
+    self.slim = kSlim
     self.qt5 = None
     self.loaded = False
     self.vispy_app = None
     self.set_qt5(os.environ.get(g_environ_pyqt, g_pyqt5) == g_pyqt5)
     self.qt_imports = None
     self.ran_magic = 0
+    self.app = None
+    self.rx_qt_sched = None
+    self.jax_dump_dir = None
+
+  def create_app(self, ctx=dict()):
+    app = qt_imports.QApplication.instance()
+    if app is None:
+      # needs to be stored otherwise GCed
+      self.app = qt_imports.QApplication(ctx.get('other_args', []))
+    else:
+      assert self.app is not None # app should be created through g_env?
+    return app
+
+  @cmisc.cached_property
+  def qt_sched(self):
+    # sucks when observable generated from thread not started by qthread
+    self.create_app()
+    from reactivex.scheduler.mainloop import QtScheduler
+    return QtScheduler(self.qt_imports.QtCore)
 
   def set_qt5(self, v=1, load=0):
     if self.loaded:
@@ -53,12 +63,12 @@ class Env:
       self.get_qt_imports()
       self.loaded = 1
 
-
   def run_magic(self, force=False):
     if not self.ran_magic and (cmisc.is_interactive() or force):
       self.ran_magic = 1
       magic_name = ['qt4', 'qt5'][self.qt5]
       print('Runnign magic', magic_name)
+      self.create_app()
       try:
         get_ipython().run_line_magic('gui', magic_name)
       except:
@@ -68,11 +78,12 @@ class Env:
   def get_qt_imports(self):
 
     if self.qt5:
-      from PyQt5 import QtGui, QtCore, QtWidgets, QtTest
+      from PyQt5 import QtGui, QtCore, QtWidgets, QtTest, QtWebEngineWidgets
       QWidget, QApplication = QtWidgets.QWidget, QtWidgets.QApplication  # Compat
     else:
       from PyQt4 import QtGui, QtCore, QtTest
       QWidget, QApplication = QtGui.QWidget, QtGui.QApplication
+      QtWebEngineWidgets = None
     import vispy.app
     vispy.app.use_app(self.vispy_app)
 
@@ -84,6 +95,7 @@ class Env:
         QtCore=QtCore,
         QtGui=QtGui,
         QtWidgets=QtWidgets,
+        QtWebEngineWidgets=QtWebEngineWidgets,
     )
 
   def get_qt_imports_lazy(self):
@@ -94,6 +106,24 @@ class Env:
       return self.qt_imports.get(name), 1
 
     return cmisc.Attr(handler=handler)
+
+  def setup(self, app):
+    np.random.seed(0)
+    random.seed(0)
+    os.environ['SAGE_LOCAL'] = '/usr'
+    np.set_printoptions(edgeitems=10, linewidth=280)
+    np.set_printoptions(formatter={'int_kind': '{:}'.format, 'float_kind': '{:.07f}'.format})
+
+    self.jax_dump_dir = tempfile.TemporaryDirectory(prefix='jaxdump')
+    app.global_context.enter_context(self.jax_dump_dir)
+
+    os.environ[
+        "XLA_FLAGS"
+    ] = f'--xla_force_host_platform_device_count=16 --xla_embed_ir_in_executable --xla_dump_to={self.jax_dump_dir.name}'
+
+    if not kNoJax:
+      import jax
+      jax.config.update("jax_enable_x64", False)
 
 
 g_env = Env()

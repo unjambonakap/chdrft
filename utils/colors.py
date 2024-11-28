@@ -1,9 +1,9 @@
-#!/usr/bin/env python 
+#!/usr/bin/env python
 
-
-import chdrft.utils.misc  as cmisc
+import chdrft.utils.misc as cmisc
 import seaborn as sns
 import numpy as np
+
 kelly_colors_hex_c1 = [
     0xFFB300,  # Vivid Yellow
     0xFF6800,  # Vivid Orange
@@ -31,37 +31,43 @@ kelly_colors_hex_c2 = [
     0x232C16,  # Dark Olive Green
 ]
 
-kelly_colors = dict(vivid_yellow=(255, 179, 0),
-                    strong_purple=(128, 62, 117),
-                    vivid_orange=(255, 104, 0),
-                    very_light_blue=(166, 189, 215),
-                    vivid_red=(193, 0, 32),
-                    grayish_yellow=(206, 162, 98),
-                    medium_gray=(129, 112, 102),
+kelly_colors = dict(
+    vivid_yellow=(255, 179, 0),
+    strong_purple=(128, 62, 117),
+    vivid_orange=(255, 104, 0),
+    very_light_blue=(166, 189, 215),
+    vivid_red=(193, 0, 32),
+    grayish_yellow=(206, 162, 98),
+    medium_gray=(129, 112, 102),
 
-                    # these aren't good for people with defective color vision:
-                    vivid_green=(0, 125, 52),
-                    strong_purplish_pink=(246, 118, 142),
-                    strong_blue=(0, 83, 138),
-                    strong_yellowish_pink=(255, 122, 92),
-                    strong_violet=(83, 55, 122),
-                    vivid_orange_yellow=(255, 142, 0),
-                    strong_purplish_red=(179, 40, 81),
-                    vivid_greenish_yellow=(244, 200, 0),
-                    strong_reddish_brown=(127, 24, 13),
-                    vivid_yellowish_green=(147, 170, 0),
-                    deep_yellowish_brown=(89, 51, 21),
-                    vivid_reddish_orange=(241, 58, 19),
-                    dark_olive_green=(35, 44, 22))
+    # these aren't good for people with defective color vision:
+    vivid_green=(0, 125, 52),
+    strong_purplish_pink=(246, 118, 142),
+    strong_blue=(0, 83, 138),
+    strong_yellowish_pink=(255, 122, 92),
+    strong_violet=(83, 55, 122),
+    vivid_orange_yellow=(255, 142, 0),
+    strong_purplish_red=(179, 40, 81),
+    vivid_greenish_yellow=(244, 200, 0),
+    strong_reddish_brown=(127, 24, 13),
+    vivid_yellowish_green=(147, 170, 0),
+    deep_yellowish_brown=(89, 51, 21),
+    vivid_reddish_orange=(241, 58, 19),
+    dark_olive_green=(35, 44, 22)
+)
 
 
 class ColorConv:
 
   @staticmethod
-  def to_rgb(v):
+  def to_rgb(v, as_float=False):
     if isinstance(v, int):
-      v= ((v >> 16) % 256, (v >> 8) % 256, (v >> 0) % 256)
-    return np.array(v)
+      v = ((v >> 16) % 256, (v >> 8) % 256, (v >> 0) % 256)
+    v = np.array(v)
+    if as_float:
+      if np.issubdtype(v.dtype, np.integer):
+        v = v / 255
+    return v
 
   @staticmethod
   def to_hex(v):
@@ -75,48 +81,52 @@ class BackupColors:
   def __init__(self):
     self.pos = 0
 
-  def get(self):
+  def get(self, remove=True):
     col = kelly_colors[self.pos]
-    self.pos = (self.pos + 1) % len(kelly_colors)
+    if remove:
+      self.pos = (self.pos + 1) % len(kelly_colors)
     return col
 
 
 class ColorPool:
 
-  def __init__(self, want_backup_colors=True):
-    self.p1 = list(kelly_colors_hex_c1)
-    self.p2 = list(kelly_colors_hex_c2)
-
+  def __init__(self, want_backup_colors=True, looping=False):
+    self.colors = list(kelly_colors_hex_c1) + list(kelly_colors_hex_c2)
     self.backup_colors = None
+    self.looping = looping
+    self.pos = 0
     if want_backup_colors:
       self.backup_colors = BackupColors()
 
-  def get_from(self, p):
-    c = p[0]
-    del p[0]
-    return c
-
   def release(self, c):
     c = ColorConv.to_hex(c)
-    if c in kelly_colors_hex_c1 and c not in self.p1:
-      self.p1.append(c)
-    elif c in kelly_colors_hex_c2 and c not in self.p2:
-      self.p2.append(c)
-  def __call__(self): return self.get()
+    self.colors.append(c)
 
-  def get(self):
-    if len(self.p1) > 0:
-      return self.get_from(self.p1)
-    if len(self.p2) > 0:
-      return self.get_from(self.p2)
+  def __call__(self, remove=True):
+    return self.get(remove=remove)
+
+  def get(self, remove=True):
+    if self.colors:
+      if self.looping:
+        pos = self.pos
+        if remove:
+          self.pos += 1
+        return self.colors[pos % len(self.colors)]
+      else:
+        res = self.colors[0]
+        if remove:
+          del self.colors[0]
+        return res
+
     assert self.backup_colors is not None
-    self.backup_colors.get()
+    return self.backup_colors.get(remove)
 
-  def get_rgb(self):
-    return ColorConv.to_rgb(self.get())
+  def get_rgb(self, **kwargs):
+    return ColorConv.to_rgb(self.get(**kwargs))
 
 
 class ColorMapper:
+
   def __init__(self, vals):
     self.rmp = cmisc.Remap(vals)
     self.cmap = sns.color_palette(n_colors=self.rmp.n)
@@ -126,6 +136,5 @@ class ColorMapper:
 
 
 def get_inf_cpool(name) -> cmisc.InfGenerator:
-    from vispy.color import Color, get_colormap
-    return cmisc.InfGenerator(get_colormap('viridis'))
-
+  from vispy.color import get_colormap
+  return cmisc.InfGenerator(get_colormap('viridis'))

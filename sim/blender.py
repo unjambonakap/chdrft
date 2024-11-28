@@ -5,9 +5,8 @@ from chdrft.main import app
 from chdrft.utils.cmdify import ActionHandler
 from chdrft.utils.misc import Attributize
 import chdrft.utils.misc as cmisc
-import glog
 import numpy as np
-from chdrft.utils.types import *
+from chdrft.utils.opa_types import *
 from chdrft.sim.moon_sunrise import *
 from chdrft.display.blender import *
 from chdrft.display.blender import BlenderTriangleActor

@@ -346,7 +346,7 @@ g.run()
 
 
 from gnuradio.filter import firdes
-from gnuradio import gr, blocks, filter
+from gnuradio import filter
 
 
 taps = firdes.low_pass(1.0, orig_sample_rate, bpsk_rate * 1.1, bpsk_rate * 0.5, firdes.WIN_HAMMING, 6.76)

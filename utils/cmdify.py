@@ -1,15 +1,15 @@
 #!/usr/bin/env python
 
+from __future__ import annotations
 import sys
 import inspect
-import argparse
-from chdrft.utils.misc import Attributize, is_python2, cwdpath, csv_list
+from chdrft.utils.misc import Attributize, is_python2, csv_list
 import chdrft.utils.misc as cmisc
 import pickle
 import subprocess as sp
 import glog
 import os
-import pprint
+
 
 if not is_python2:
   from contextlib import ExitStack
@@ -23,6 +23,8 @@ def prepare_parser(sp, cmd):
   parser = sp.add_parser(name)
   return parser
 
+kInitFuncName = 'opa_ah_init'
+
 def argparsify(parser, a):
 
   names = []
@@ -33,7 +35,7 @@ def argparsify(parser, a):
       names.append(px.name)
       typs.append(px.annotation)
   else:
-    args = inspect.getargspec(a.func)
+    args = inspect.getfullargspec(a.func)
     names = args.args
     typs = a.args
     defaults = args.defaults
@@ -122,7 +124,7 @@ def run_cmdify(parser, lst):
   FileCacheDB = None
   cache_argparse = None
   if not is_python2:
-    from chdrft.utils.cache import FileCacheDB, cache_argparse
+    pass
 
   #if cache_argparse:
   #  cache_argparse(parser)
@@ -143,7 +145,7 @@ def run_cmdify(parser, lst):
 
 
 class ActionHandler:
-  g_handler = None
+  g_handler: ActionHandler = None
 
   def __init__(self, parser, cmds, init=None, global_action=False):
     self.parser = parser
@@ -154,13 +156,13 @@ class ActionHandler:
     parser.add_argument('--noaction-log-output', action='store_true')
     parser.add_argument('--noctrlc-trace', action='store_true')
     parser.add_argument('--ret-syscode', action='store_true')
-    parser.add_argument('--no-local-db', action='store_true')
+    parser.add_argument('--local-db', action='store_true')
     parser.add_argument('--local-db-file', type=str, default='.chdrft.db.pickle')
 
     self.args = None
     self.kwargs = None
     self.flags = None
-    self.stack = None
+    self.stack : ExitStack = None
     self.init = init
     self.global_action = global_action
 
@@ -178,7 +180,7 @@ class ActionHandler:
           ctx[k] = v
 
       from chdrft.utils.path import FileFormatHelper
-      if not flags.no_local_db and os.path.exists(flags.local_db_file):
+      if flags.local_db and os.path.exists(flags.local_db_file):
         try:
           tmp = FileFormatHelper.Read(flags.local_db_file)
           tmp.update(ctx)
@@ -188,7 +190,10 @@ class ActionHandler:
 
       self.args[0] = ctx
 
-    if self.init: self.init(*self.args)
+
+    if self.init: 
+      self.init(*self.args)
+    self.execute_action(self.caller_ctx.get(kInitFuncName))
 
     if flags.action_output_file:
       if stack is not None:
@@ -207,7 +212,7 @@ class ActionHandler:
     except KeyboardInterrupt as e:
       if flags.noctrlc_trace: pass
       else: raise e
-    if not flags.no_local_db:
+    if flags.local_db:
       FileFormatHelper.Write(flags.local_db_file, ctx)
 
   def proc(self, flags, caller_ctx, *args, **kwargs):
@@ -226,6 +231,10 @@ class ActionHandler:
 
     for action in self.cleanup_actions:
       self.execute_action(action)
+
+    self.args = None
+    self.kwargs = None
+
 
 
   def reqs(self, flags):
@@ -262,9 +271,10 @@ class ActionHandler:
     return self.cmds[action_name]
 
   def execute_action(self, action):
+    if action is None: return None
     if callable(action):
-      return action(*self.args, **self.kwargs)
-    return action.func(*self.args, **self.kwargs)
+      return cmisc.call_sync_or_async(action, *self.args, **self.kwargs)
+    return cmisc.call_sync_or_async(action.func, *self.args, **self.kwargs)
 
   @staticmethod
   def Prepare(*args, **kwargs):

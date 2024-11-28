@@ -1,12 +1,7 @@
 #!/usr/bin/env python
 
-from chdrft.utils.misc import cwdpath, Attributize, kv_to_dict
+from chdrft.utils.misc import Attributize
 from chdrft.utils.arg_gram import LazyConf
-import numpy as np
-from scipy import signal
-from chdrft.cmds import Cmds
-import os
-import math
 from chdrft.display.utils import *
 import re
 import itertools

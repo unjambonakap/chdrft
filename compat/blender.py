@@ -9,7 +9,7 @@ from chdrft.utils.misc import Attributize as A
 import chdrft.utils.misc as cmisc
 import glog
 import numpy as np
-from chdrft.utils.types import *
+from chdrft.utils.opa_types import *
 
 global flags, cache
 flags = None

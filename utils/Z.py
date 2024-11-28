@@ -29,7 +29,6 @@ import ctypes
 import curses.ascii
 import glob
 import glog
-import gmpy2
 import heapq
 import io
 import itertools
@@ -51,11 +50,14 @@ import tempfile
 import threading
 import time
 import traceback as tb
-import wrapt
 import shapely.ops as geo_ops
 import shapely.geometry as geometry
 import functools
 import typing
+
+if not env.g_env.slim:
+  import gmpy2
+  import wrapt
 
 
 
@@ -66,19 +68,16 @@ from chdrft.dsp.cv_utils import to_grayscale
 from chdrft.main import app
 from chdrft.struct.base import Intervals, get_primitive_ranges, Range1D, Range2D, Box, g_unit_box, g_one_box, GenBox
 from chdrft.tools.xxd import xxd
-from chdrft.utils.arg_gram import LazyConf
 from chdrft.utils.cache import Cachable
 from chdrft.utils.cmdify import ActionHandler
 from chdrft.utils.colors import ColorPool, ColorMapper
 from chdrft.utils.fmt import Format
 from chdrft.utils.geo import Line, smallest_circle
 from chdrft.utils.geo import to_shapely
-from chdrft.utils.math import MatHelper, deg2rad, rad2deg
+from chdrft.utils.omath import MatHelper, deg2rad, rad2deg
 from chdrft.utils.misc import Attributize, failsafe
 from chdrft.utils.opa_string import FuzzyMatcher, lcs, min_substr_diff
 from chdrft.utils.path import FileFormatHelper
-from chdrft.utils.swig import swig, swig_unsafe
-import chdrft.conv.utils as conv_utils
 import chdrft.crypto.common as ccrypto
 import chdrft.display.utils as dsp_utils
 import chdrft.graph.base as graph_base
@@ -86,9 +85,13 @@ import chdrft.math.sampling as opa_sampling
 import chdrft.struct.base as opa_struct
 import chdrft.utils.cache as opa_cache
 import chdrft.utils.geo as geo_utils
-import chdrft.utils.math as opa_math
+import chdrft.utils.omath as opa_math
 import chdrft.utils.misc as cmisc
 
+if not env.g_env.slim:
+  from chdrft.utils.swig import swig, swig_unsafe
+  from chdrft.utils.arg_gram import LazyConf
+  import chdrft.conv.utils as conv_utils
 
 
 

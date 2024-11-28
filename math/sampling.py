@@ -8,7 +8,7 @@ import chdrft.utils.misc as cmisc
 import glog
 import numpy as np
 import math, sys, os
-from chdrft.utils.types import *
+from chdrft.utils.opa_types import *
 import chdrft.utils.geo as geo_utils
 import chdrft.struct.base as opa_struct
 import shapely.geometry as geo

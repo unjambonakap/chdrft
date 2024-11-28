@@ -393,9 +393,9 @@ i2c_actions = [
                     func=lambda x, mode: x.set_speed(mode)),
     BusPirateAction(name='write_and_read',
                     func=BusPirateModeManager.i2c_write_and_read),
-    BusPirateAction(name='i2c_write',
+    BusPirateAction(name='write',
                     func=BusPirateModeManager.i2c_write),
-    BusPirateAction(name='i2c_read',
+    BusPirateAction(name='read',
                     func=BusPirateModeManager.i2c_read),
 ]
 

@@ -5,10 +5,7 @@ from chdrft.main import app
 from chdrft.utils.cmdify import ActionHandler
 from chdrft.utils.misc import Attributize
 import chdrft.utils.misc as cmisc
-import glog
-import numpy as np
-from chdrft.utils.types import *
-import PyFoam
+from chdrft.utils.opa_types import *
 from chdrft.interactive.scripter import get_bash_scripter
 from contextlib import ExitStack
 import os
@@ -18,10 +15,6 @@ global flags, cache
 flags = None
 cache = None
 
-from PyFoam.Applications.PrepareCase import PrepareCase
-from PyFoam.Applications.CloneCase import CloneCase
-from PyFoam.Applications.Runner import Runner
-from PyFoam.RunDictionary.ParsedParameterFile import ParsedParameterFile
 from PyFoam.RunDictionary.SolutionDirectory import SolutionDirectory
 from PyFoam.Execution.ConvergenceRunner import ConvergenceRunner
 from PyFoam.LogAnalysis.BoundingLogAnalyzer import BoundingLogAnalyzer

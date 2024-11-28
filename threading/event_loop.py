@@ -7,7 +7,7 @@ from chdrft.utils.misc import Attributize
 import chdrft.utils.misc as cmisc
 import glog
 import numpy as np
-from chdrft.utils.types import *
+from chdrft.utils.opa_types import *
 import queue
 from concurrent.futures import Future
 import threading

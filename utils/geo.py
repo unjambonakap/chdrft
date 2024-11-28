@@ -5,12 +5,10 @@ from chdrft.main import app
 from chdrft.utils.cmdify import ActionHandler
 from chdrft.utils.misc import A
 import chdrft.utils.misc as cmisc
-import glog
 import numpy as np
-import random
 import shapely
-from chdrft.utils.math import Normalizer
-from chdrft.utils.math import *
+from chdrft.utils.omath import Normalizer
+from chdrft.utils.omath import *
 from shapely.geometry import Polygon, LineString, Point, MultiPoint
 from shapely.geometry.base import BaseGeometry
 import chdrft.graph.base as graph_base

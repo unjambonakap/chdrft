@@ -1,6 +1,7 @@
 import pandas as pd
 import bs4
 from chdrft.cmds import Cmds
+from chdrft.utils.misc import json_dumps
 
 def to_csv(tb_2d):
   return pd.DataFrame(tb_2d).to_csv(index=False, header=False)
@@ -30,6 +31,11 @@ def html_to_df(s):
     headers=headers[0]
   return pd.DataFrame.from_records(data, columns=headers)
 
+
+
+def read_bson(filename):
+  import bson
+  return json_dumps(bson.loads(open(filename, 'rb').read()))
 
 @Cmds.make
 def mesh_reencode(infile:str, outfile:str):
