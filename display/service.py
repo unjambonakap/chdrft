@@ -1,9 +1,9 @@
 #!/usr/bin/env python
 
+import chdrft.utils.misc as cmisc
 from chdrft.cmds import CmdsList
 from chdrft.main import app
 from chdrft.utils.cmdify import ActionHandler
-from chdrft.utils.misc import Attributize
 from chdrft.utils.misc import Attributize as A
 import numpy as np
 from enum import Enum
@@ -13,6 +13,8 @@ from chdrft.display.ui import PlotEntry, OpaPlot, MetricWidget
 import chdrft.display.video_helper as vh
 import reactivex.operators as ops
 from chdrft.config.env import g_env
+import typing
+import chdrft.display.plot_req as oplot_req
 
 global flags, cache
 flags = None
@@ -24,12 +26,31 @@ def args(parser):
   ActionHandler.Prepare(parser, clist.lst, global_action=1)
 
 
-class PlotTypes(Enum):
-  Graph = 'graph'
-  Vispy = 'vispy'
-  Fig = 'fig'
-  Metric = 'metric'
+class PlotTypeDesc(cmisc.PatchedModel):
+  create_widget: type
+  type: grid.PlotTypesEnum
+  add_to_widget: typing.Callable
 
+
+descs = [
+    PlotTypeDesc(
+        type=grid.PlotTypesEnum.Graph, create_widget=OpaPlot, add_to_widget=OpaPlot.add_plot
+    ),
+    PlotTypeDesc(
+        type=grid.PlotTypesEnum.Metric,
+        create_widget=grid.MetricStoreWidget,
+        add_to_widget=grid.MetricStoreWidget.add
+    ),
+    PlotTypeDesc(
+        type=grid.PlotTypesEnum.Vispy,
+        create_widget=vh.GraphWidget,
+        add_to_widget=lambda w, x: w.vctx.plot_meshes(x)
+    ),
+    PlotTypeDesc(
+        type=grid.PlotTypesEnum.Fig, create_widget=vh.FigWidget, add_to_widget=lambda w, x: None
+    ),
+]
+g_plot_type2desc = {x.type: x for x in descs}
 
 # updating oplt >>
 #gw = oplt.windows[0].gw.gp.zorder[0]['w']
@@ -38,10 +59,26 @@ class PlotTypes(Enum):
 #gw.vctx.update_axis_visual = lambda: update_axis_visual(gw.vctx)
 
 
+def guess_typ(obj, typ):
+  if typ is not None:
+    if isinstance(typ, str):
+      for e in grid.PlotTypesEnum:
+        if typ == e.value: return e
+      else:
+        assert 0, typ
+
+    return typ
+
+  if isinstance(obj, (Dataset, np.ndarray, PlotEntry)): return grid.PlotTypesEnum.Graph
+  if isinstance(obj, (vh.QWidget, MetricWidget)): return grid.PlotTypesEnum.Metric
+  return grid.PlotTypesEnum.Vispy
+
+
 class PlotService:
 
   def __init__(self):
     self.windows = []
+
   def setup(self):
     g_env.create_app()
 
@@ -57,57 +94,28 @@ class PlotService:
     if not self.windows: return None
     return self.windows[-1]
 
-  def guess_typ(self, obj, typ):
-    if typ is not None:
-      if isinstance(typ, str):
-        for e in PlotTypes:
-          if typ == e.value: return e
-        else:
-          assert 0, typ
+  def plot(self, req: oplot_req.PlotRequest, o=1) -> oplot_req.PlotResult | None:
+    gwh = None
+    if not req.new_window: gwh = self.find_window()
+    if gwh is None: gwh = self.create_window()
 
-      return typ
+    typ = guess_typ(req.obj, req.type)
+    entry: GridEntry = gwh.gw.gp.find(typ, req.label, req.attach_to_existing)
 
-    if isinstance(obj, (Dataset, np.ndarray, PlotEntry)): return PlotTypes.Graph
-    if isinstance(obj, (vh.QWidget, MetricWidget)): return PlotTypes.Metric
-    return PlotTypes.Vispy
-
-  def plot(self, obj=None, typ=None, new_window=0, label=None, o=0, gwh=None, **kwargs):
-    if not new_window: gwh = self.find_window()
-    if not gwh: gwh = self.create_window()
-    typ = self.guess_typ(obj, typ)
-    entry = gwh.gw.gp.find_by_label(label)
-    if entry is not None: entry = entry.w
+    attach_w = None if entry is None else entry.w
 
     res = None
-    if typ == PlotTypes.Vispy: res = self.plot_vispy(obj, entry=entry, **kwargs)
-    elif typ == PlotTypes.Metric: res = self.plot_metric(obj, entry=entry, **kwargs)
-    elif typ == PlotTypes.Fig: res = self.plot_fig(obj, entry=entry, **kwargs)
-    else: res = self.plot_graph(obj, entry=entry, **kwargs)
+    typ_desc = g_plot_type2desc[typ]
+    if attach_w is None:
+      attach_w = typ_desc.create_widget()
+    add_res = typ_desc.add_to_widget(attach_w, req.obj)
 
-    if entry is None: gwh.gw.add(res.w, label=label, **kwargs)
+    if entry is None:
+      entry = grid.GridEntry(w=attach_w, label=req.label, type=typ)
+      gwh.attach(entry)
+
+    res = oplot_req.PlotResult(ge=entry, req=req, input_obj=req.obj, ge_item=add_res, type=typ)
     if o: return res
-
-  def plot_vispy(self, obj, entry=None, update_vb=1, **kwargs):
-    if entry is None: entry = vh.GraphWidget()
-    data = entry.vctx.plot_meshes(obj, **kwargs)
-    if update_vb: entry.vctx.set_viewbox(vb_hint=data.vb_hint)
-    return A(w=entry, data=data)
-
-  def plot_fig(self, obj, entry=None, **kwargs):
-    if entry is None: entry = vh.FigWidget()
-    return A(w=entry)
-
-  def plot_graph(self, obj, entry:OpaPlot | None=None, gwh=None, **kwargs):
-    if entry is None: entry = OpaPlot(**kwargs)
-    data = entry.add_plot(obj, **kwargs)
-    return A(w=entry, data=data)
-
-  def plot_metric(self, obj=None, entry=None, gwh=None, **kwargs):
-    if entry is None: entry = grid.MetricStoreWidget()
-    if not isinstance(obj, MetricWidget):
-      obj = MetricWidget.Make(**obj)
-    data = entry.add(obj)
-    return A(w=entry, data=data)
 
 
 g_plot_service: PlotService = PlotService()
@@ -119,7 +127,7 @@ def test(ctx):
 
 
 def main():
-  ctx = Attributize()
+  ctx = A()
   ActionHandler.Run(ctx)
 
 

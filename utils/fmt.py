@@ -60,7 +60,7 @@ class Format(object):
     return self
 
   def from_json(self):
-    self.v = cmisc.Attr.RecursiveImport(cmisc.json_loads(self.v))
+    self.v = cmisc.json_loads(self.v)
     return self
 
   def from_csv(self, **kwargs):

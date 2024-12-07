@@ -24,11 +24,14 @@ from reprlib import recursive_repr
 from pydantic import BaseModel, Extra, Field
 import pydantic as pydantic
 import pandas as pd
-from functools import cached_property
 import shapely, shapely.geometry, shapely.geometry.base
 import itertools
 from contextlib import ExitStack
+import contextlib
 import enum
+import pprint
+import threading
+import typing
 
 from typing import no_type_check
 from copy import deepcopy
@@ -39,21 +42,30 @@ from typing import TYPE_CHECKING
 RUNTIME = not TYPE_CHECKING
 
 if RUNTIME:
-    def base_model(model):
-        return model
+
+  from functools import cached_property
+
+  def base_model(model):
+    return model
 else:
-    from dataclasses import dataclass as base_model
+  cached_property = property
+  from dataclasses import dataclass as base_model
 
 pydantic.BaseConfig.copy_on_model_validation = 'none'
+
+
 def pyd_f(func):
   return Field(default_factory=func)
+
 
 def call_sync_or_async(f, *args, **kwargs):
   import asyncio
   if asyncio.iscoroutinefunction(f):
     el = asyncio.get_event_loop()
+    print(f)
     return el.run_until_complete(f(*args, **kwargs))
   return f(*args, **kwargs)
+
 
 def yield_wrapper(f):
 
@@ -81,6 +93,17 @@ def logged_f_internal(f, filename):
           fx.write(tb.format_exc())
 
       raise
+
+  return x
+
+
+def logged_failsafe_async(f):
+
+  async def x(*args, **kwargs):
+    try:
+      await f(*args, **kwargs)
+    except:
+      tb.print_exc()
 
   return x
 
@@ -158,6 +181,20 @@ class ExitStackWithPush(ExitStack):
     super().__enter__()
     [self.enter_context(x) for x in self.pushs]
 
+
+class ContextObj(ExitStack):
+
+  def __init__(self, obj, func):
+    super().__init__()
+    self.obj = obj
+    self.func = func
+
+  def __enter__(self):
+    super().__enter__()
+    self.enter_context(self.func)
+    return self.obj
+
+
 class List:
 
   @staticmethod
@@ -210,6 +247,7 @@ devnull = open(os.devnull, 'r')
 
 def identity(x):
   return x
+
 
 def nop_func(*args, **kwargs):
   pass
@@ -281,6 +319,7 @@ if sys.version_info >= (3, 0):
 
   #import jsonpickle.ext.numpy as jsonpickle_numpy
   #jsonpickle_numpy.register_handlers()
+
 
   def json_flatten(obj, **kwargs):
     return jsonpickle.Pickler(backend=misc_backend, unpicklable=0, **kwargs).flatten(obj)
@@ -1226,9 +1265,10 @@ class TimeoutException(Exception):
 class Timeout:
   _TimeoutException = TimeoutException
 
-  def __init__(self, td=None):
+  def __init__(self, td=None, ev: threading.Event = None):
     self.start = datetime.now()
     self.never = td is None
+    self.ev = ev
     if self.never:
       self.end = None
     else:
@@ -1238,7 +1278,13 @@ class Timeout:
   def from_sec(x):
     return Timeout(timedelta(seconds=x))
 
+  @classmethod
+  def from_event(cls, twait_s: float, ev: threading.Event):
+    return Timeout(timedelta(seconds=twait_s), ev=ev)
+
   def expired(self):
+    if self.ev is not None:
+      return self.ev.is_set()
     return not self.never and self.end <= datetime.now()
 
   def get_sec(self):
@@ -1572,6 +1618,9 @@ def filter_glob_list(lst, globs, blacklist_default=True, key=lambda x: x, blackl
       yield entry
 
 
+def file_glob(dir, globs):
+  return filter_glob_list(list_files_rec(dir), globs)
+
 
 def whitelist_blacklist_filter(lst, whitelist, blacklist, ikey=lambda x: x[1]):
   ilst = list(enumerate(lst))
@@ -1854,6 +1903,16 @@ handlers = [
 handler_list = []
 
 
+def single_value(lst):
+  a = list(lst)
+  assert len(a) == 1
+  return a[0]
+
+def single_or_none(lst):
+  a = list(lst)
+  return a[0] if len(a) == 1 else None
+
+
 class SingleValue:
 
   def __init__(self, val=None):
@@ -1891,7 +1950,6 @@ def define_json_handler(handler):
 
 for handler in handlers:
   define_json_handler(handler)
-
 
 try:
   import yaml
@@ -1953,8 +2011,10 @@ class cached_classproperty(object):
     setattr(cls, self.func.__name__, value)
     return value
 
+
 def make_class_kwargs(cl, kwargs):
   return cl(**kwargs)
+
 
 @base_model
 class PatchedModel(
@@ -1963,17 +2023,22 @@ class PatchedModel(
     #json_loads=json_loads,
 ):
   model_config = pydantic.ConfigDict(
-    population_by_name=True,
-    extra=Extra.forbid,
-    arbitrary_types_allowed=True,
-    ignored_types=(cached_property, cached_classproperty),
+      population_by_name=True,
+      extra=Extra.forbid,
+      arbitrary_types_allowed=True,
+      ignored_types=(cached_property, cached_classproperty),
   )
-
 
   def model_post_init(self, ctx):
     super().model_post_init(ctx)
     self.__post_init__()
 
+
+  def model_update(self, **kwargs):
+    for k,v in kwargs.items():
+      setattr(self, k ,v)
+
+    return self
   def __post_init__(self):
     pass
 
@@ -1983,7 +2048,9 @@ class PatchedModel(
   def __excluded_keys(self) -> set[str]:
     res = set()
     for k in self.__dict__.keys():
-      if isinstance(getattr(type(self), k, None), (cached_property, cached_classproperty)):
+      if isinstance(
+          getattr(type(self), k, None), (cached_property, cached_classproperty, ExitStack)
+      ):
         res.add(k)
     return res
 
@@ -2029,6 +2096,30 @@ class PatchedModel(
         raise e
 
 
+class ContextModel(PatchedModel):
+  contextmodel_ctx: ExitStackWithPush = pyd_f(ExitStackWithPush)
+
+  def ctx_push(self, subctx, prepend=False):
+    if prepend:
+      self.contextmodel_ctx.pushs.insert(0, subctx)
+    else:
+      self.contextmodel_ctx.pushs.append(subctx)
+
+
+  @contextlib.contextmanager
+  def _enter(self):
+    yield self
+
+
+  def __enter__(self):
+    self.contextmodel_ctx.__enter__()
+    self.contextmodel_ctx.enter_context(self._enter())
+    return self
+
+  def __exit__(self, *exc_details):
+    self.contextmodel_ctx.__exit__(*exc_details)
+
+
 class PydanticHandler(jsonpickle.handlers.BaseHandler):
 
   def flatten(self, obj, data):
@@ -2036,6 +2127,7 @@ class PydanticHandler(jsonpickle.handlers.BaseHandler):
 
   def restore(self, obj):
     assert 0
+
 
 class ShapelyHandler(jsonpickle.handlers.BaseHandler):
 
@@ -2050,6 +2142,7 @@ class PDTimestampHandler(jsonpickle.handlers.BaseHandler):
 
   def flatten(self, obj, data):
     return self.context.flatten(str(obj))
+
 
 class EnumHandler(jsonpickle.handlers.BaseHandler):
 
@@ -2070,8 +2163,35 @@ jsonpickle.handlers.register(pd.Timedelta, PDTimestampHandler, base=True)
 PDTimestampHandler.handles(pd.Timedelta)
 jsonpickle.register(enum.Enum, EnumHandler, base=True)
 
-def return_to_ipython():
-  locs,_ = get_n2_locals_and_globals(n=0)
+
+def return_to_ipython(n=0):
+  locs, _ = get_n2_locals_and_globals(n=n)
   from IPython.terminal import interactiveshell
   interactiveshell.TerminalInteractiveShell.instance().user_global_ns.update(locs)
   assert 0
+
+
+class NameRegister(PatchedModel):
+  obj2name: dict[typing.Any, str] = pyd_f(dict)
+  name2cnt: dict[str, int] = pyd_f(lambda: defaultdict(int))
+
+  def force_or_get(self, forced_name: str | None, alternative: str) -> str:
+    if forced_name is not None:
+      self.register(forced_name, force=True)
+      return forced_name
+    else:
+      return self.register(alternative)
+
+  def register(self, proposal: str, obj=None, force=False) -> str:
+    if force:
+      self.name2cnt.add(proposal, -1)
+      return proposal
+
+    num = self.name2cnt[proposal]
+    assert num != -1
+    self.name2cnt[proposal] += 1
+    if num:
+      proposal = f'{proposal}_{num:03d}'
+      assert proposal not in self.name2cnt
+    self.obj2name[obj] = proposal
+    return proposal

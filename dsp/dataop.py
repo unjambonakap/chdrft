@@ -142,9 +142,11 @@ def HighPass(data, n=50, wn=0.3):
 
 def LowPass(data, n=10, wn=0.3):
   fx_b, fx_a = signal.iirfilter(n, wn, btype='lowpass')
-  zi = signal.lfilter_zi(fx_b, fx_a)
+  return ManualFilter(data, fx_b, fx_a)
 
-  res = signal.lfilter(fx_b, fx_a, data, zi=zi)[0]
+def ManualFilter(data, num_b, denom_a):
+  zi = signal.lfilter_zi(num_b, denom_a)
+  res = signal.lfilter(num_b, denom_a, data, zi=zi)[0]
   return res
 
 

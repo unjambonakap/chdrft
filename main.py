@@ -7,12 +7,25 @@ import sys
 import os
 import shlex
 from chdrft.config.base import is_python2
-import chdrft.config.env
+from chdrft.config.env import g_env, g_ipython
 import numpy as np
 import random
+import faulthandler
+import chdrft.utils.misc as cmisc
+
+import signal, traceback
+#def quit_handler(signum,frame):
+#    traceback.print_stack()
+#signal.signal(signal.SIGQUIT,quit_handler)
 
 if not is_python2:
   from contextlib import ExitStack
+
+import glog
+
+import logging
+
+
 
 
 class App:
@@ -24,27 +37,40 @@ class App:
     self.setup = False
     self.cache = None
     if not is_python2:
-      self.global_context = ExitStack()
+      self.global_context = cmisc.ExitStackWithPush()
 
-    self.env = chdrft.config.env.g_env
+    self.env = g_env
     self.env.setup(self)
 
   def setup_jup(self, cmdline='', argv=None, **kwargs):
-    from chdrft.utils.misc import Attr
     argv = shlex.split(cmdline)
     self(force=1, argv=argv, **kwargs, keep_open_context=1)
     self.setup = True
-    return Attr(vars(self.flags))
+    return cmisc.A(vars(self.flags))
 
   def exit_jup(self):
     self.global_context.close()
 
-  def __call__(self, force=False, argv=None, parser_funcs=[], keep_open_context=0):
+  def shell(self, n=0):
+    g_ipython.drop_to_shell(n + 1)
+
+  def wait_or_interactive(self, n=0):
+    if g_ipython.in_jupyter:
+      self.shell(n + 1)
+    else:
+      input('Press to stop')
+
+  def __call__(self, force=False, argv=None, parser_funcs=[], keep_open_context=None):
+
     f = inspect.currentframe().f_back
     if not force and self.setup: return
 
     if not force and not f.f_globals['__name__'] == '__main__': return
     self.setup = True
+
+    import sys
+    if keep_open_context is None:
+      keep_open_context = g_ipython.in_jupyter
 
     if 'main' not in f.f_globals and not force: return
     parser = None
@@ -68,6 +94,9 @@ class App:
     random.seed(0)
     np.random.seed(0)
 
+    faulthandler.register(signal.SIGQUIT)
+    faulthandler.enable(file=sys.stderr, all_threads=True)
+    faulthandler.dump_traceback(file=sys.stderr, all_threads=True)
     parser.add_argument('other_args', nargs=argparse.REMAINDER, default=['--'])
 
     flags = parser.parse_args(args=argv)
@@ -136,4 +165,3 @@ class App:
 
 
 app = App()
-

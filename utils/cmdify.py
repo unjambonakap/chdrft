@@ -157,6 +157,7 @@ class ActionHandler:
     parser.add_argument('--noctrlc-trace', action='store_true')
     parser.add_argument('--ret-syscode', action='store_true')
     parser.add_argument('--local-db', action='store_true')
+    parser.add_argument('--no-ah-init', action='store_true')
     parser.add_argument('--local-db-file', type=str, default='.chdrft.db.pickle')
 
     self.args = None
@@ -193,13 +194,17 @@ class ActionHandler:
 
     if self.init: 
       self.init(*self.args)
-    self.execute_action(self.caller_ctx.get(kInitFuncName))
+    if not flags.no_ah_init:
+      self.execute_action(self.caller_ctx.get(kInitFuncName))
 
     if flags.action_output_file:
       if stack is not None:
         output_file = FileFormatHelper(filename=flags.action_output_file, write=True)
         stack.enter_context(output_file)
     try:
+      if not self.main_actions:
+        glog.info('Not executing any actions - check arguments')
+
       for action in self.main_actions:
         res = self.execute_action(action)
         if output_file:

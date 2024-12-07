@@ -24,6 +24,7 @@ class Connection(sock.Sock):
 
     if self.udp:
       s.bind(('0.0.0.0', self.udp_bind_port))
+      print('SNDBUF >>> ', s.getsockopt(socket.SOL_SOCKET, socket.SO_SNDBUF))
     else:
       if self.sock_type == socket.AF_INET:
         s.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)

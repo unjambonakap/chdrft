@@ -372,7 +372,7 @@ class SDFConverter:
       self.model.add_link(v)
       if k.parent is not None:
         j = sdf.Joint()
-        j.set_name(joint_names.register(None, 'joint'))
+        j.set_name(joint_names.register('joint'))
         j.set_parent_name(entry2link[k.parent].name())
         j.set_child_name(v.name())
         assert k.link_data.spec.type is rb_gen.RigidBodyLinkType.RIGID

@@ -402,12 +402,13 @@ class ImageEntry:
 
 class PlotEntry:
 
-  def __init__(self, data, **kwargs):
+  def __init__(self, data: Dataset, **kwargs):
     self.data = data
     self.kwargs = kwargs
     self.obj = None
     self.plot_widget = None
-    self.data.sig_replot_cb = self.update
+
+    self.data.pub_data_changed.subscribe_safe(lambda _: self.update())
 
   def register(self, plot_widget):
     self.plot_widget = plot_widget
@@ -701,7 +702,9 @@ class OpaPlot(pg.PlotWidget):
     self.names.add(name)
     return name
 
-  def add_plot(self, plot_entry, **kwargs):
+  def add_plot(self, plot_entry, **kwargs) -> PlotEntry | None:
+    if plot_entry is None: return None
+
     if isinstance(plot_entry, (tuple, list, np.ndarray)):
       plot_entry = Dataset(plot_entry)
 
@@ -957,7 +960,6 @@ class GraphHelper:
   def run(self):
 
     if self.run_in_jupyter:
-      print('LAAAAA')
       from IPython.lib.guisupport import start_event_loop_qt4
       start_event_loop_qt4(self.app)
       return

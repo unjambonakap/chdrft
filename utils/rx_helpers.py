@@ -1,5 +1,6 @@
 #!/usr/bin/env python
 
+from __future__ import annotations
 from chdrft.config.env import g_env
 from chdrft.cmds import CmdsList
 from chdrft.main import app
@@ -12,11 +13,16 @@ from chdrft.utils.cmdify import ActionHandler
 from chdrft.utils.misc import A
 import chdrft.utils.misc as cmisc
 import numpy as np
-from chdrft.dsp.image import ImageData
 import sys
+import reactivex.operators
+import reactivex.abc
 import reactivex as rx
+import reactivex.subject.innersubscription
 from chdrft.config.env import qt_imports
 import glog
+from reactivex.subject import BehaviorSubject, Subject
+import abc
+import typing
 
 from pydantic.v1 import Field
 from typing import ClassVar
@@ -273,6 +279,7 @@ class ImageProcessor(ImageIO):
   def __call__(self, i):
     if i is None:
       return None
+    from chdrft.dsp.image import ImageData
     i = ImageData.Make(i)
     r = self.process(i)
     return ImageData.Make(r)
@@ -352,15 +359,49 @@ class FuncCtxImageProcessor(FuncImageProcessor):
 kIdImageProc = FuncImageProcessor(f=lambda x: x)
 kErrObj = object()
 
+
+class CustomSubject(rx.Subject):
+
+  def __init__(self, notify_sub=None):
+    super().__init__()
+    self._notify_subscriber = notify_sub
+
+  def _subscribe_core(self, observer, scheduler):
+    with self.lock:
+      self.check_disposed()
+      if not self.is_stopped:
+        self._notify_subscriber(observer)
+        self.observers.append(observer)
+        return rx.subject.innersubscription.InnerSubscription(self, observer)
+
+      if self.exception is not None:
+        observer.on_error(self.exception)
+      else:
+        observer.on_completed()
+      return Disposable()
+
+
 if not g_env.slim:
+
   class QtSig(qt_imports.QtCore.QObject):
     obj = qt_imports.QtCore.pyqtSignal(object)
 
+
 class WrapRX:
 
-  def __init__(self, obj):
+  @classmethod
+  def Subject(cls):
+    return cls(rx.Subject())
+
+  @classmethod
+  def CustomSubject(cls, **kwargs):
+    return cls(CustomSubject(**kwargs))
+
+  def __init__(self, obj: rx.Observable):
+    rx.operators.replay
     self.obj = obj
     self.value = None
+    self.done = cmisc.threading.Event()
 
   def __getattr__(self, name):
     if hasattr(self.obj, name): return getattr(self.obj, name)
@@ -406,16 +447,68 @@ class WrapRX:
     def call(*args, **kwargs):
       return f(*args, **kwargs)
 
+    subscribe_kwargs = subscribe_kwargs | dict(
+        on_error=glog.exception, on_completed=lambda: self.done.set()
+    )
     if qt_sig:
       sig = QtSig()
       sig.obj.connect(call)
-      self.subscribe(on_next=lambda x: sig.obj.emit(x), on_error=glog.exception, **subscribe_kwargs)
+      self.obj.subscribe(on_next=lambda x: sig.obj.emit(x), **subscribe_kwargs)
     else:
-      self.subscribe(on_next=call, on_error=glog.exception, **subscribe_kwargs)
+      self.obj.subscribe(on_next=call, **subscribe_kwargs)
 
   def listen_value(self):
     self.subscribe_safe(self.set_value)
     return self
+
+
+kAddAction = True
+kRemoveAction = False
+class ObservableSet(cmisc.PatchedModel):
+  data: set = cmisc.pyd_f(set)
+  ev: WrapRX = None
+
+  def __post_init__(self):
+    self.ev = WrapRX.CustomSubject(notify_sub=self.notify_sub)
+
+
+  def merge(self, peer: ObservableSet):
+    peer.subscribe(self.add, self.remove)
+
+  def proc_event(self, action_and_item):
+    action, item = action_and_item
+    if action is kAddAction:
+      self.add(item)
+    else:
+      self.remove(item)
+
+  def notify_sub(self, obs):
+    for obj in self.data:
+      obs.on_next((kAddAction, obj))
+
+  def add(self, item):
+    if item not in self.data:
+      self.data.add(item)
+      self.ev.on_next((kAddAction, item))
+
+  def remove(self, item):
+    self.data.remove(item)
+    self.ev.on_next((kRemoveAction, item))
+
+  def subscribe(self, add_action, remove_action):
+    self.ev.subscribe_safe(lambda action_and_item: {kAddAction: add_action, kRemoveAction: remove_action}[action_and_item[0]](action_and_item[1]))
+
+
+  def update(self, items):
+    for x in items:
+      self.add(x)
+    return self
+
+  def __ior__(self, peer):
+    for p in peer:
+      self.add(p)
+    return self
+
 
 def jupyter_print(x):
   from IPython.display import clear_output

@@ -1,10 +1,13 @@
 #!/usr/bin/env python
 
+from __future__ import annotations
 import os
 import chdrft.utils.misc as cmisc
 import tempfile
 import numpy as np
 import random
+import sys
+import glog
 
 g_pyqt4 = 'pyqt4'
 g_pyqt5 = 'pyqt5'
@@ -20,6 +23,45 @@ if not kNoJax:
 if not kSlim:
   from PyQt5 import QtCore
 
+class IPythonHandler(cmisc.PatchedModel):
+  tapp: object = None
+  in_jupyter_at_startup: bool = False
+
+  def __post_init__(self):
+    self.in_jupyter_at_startup = cmisc.is_interactive() or sys.argv[0].endswith('/ipython') or (
+        isinstance(__builtins__, dict) and '__IPYTHON__' in __builtins__
+    )
+
+  @property
+  def in_ipython(self):
+    return self.tapp is not None
+
+  @property
+  def in_jupyter(self) -> bool:
+    return self.in_jupyter_at_startup or self.in_ipython
+
+  def get_ipython(self):
+    if self.tapp is not None:
+      return self.tapp.shell
+    else:
+      return get_ipython() # try jupyter magic stuff
+
+
+
+  def drop_to_shell(self, n):
+    from IPython.terminal import ipapp
+    self.tapp = ipapp.TerminalIPythonApp.instance()
+    self.tapp.initialize()
+    g_env.run_magic(force2=True)
+
+    locs, g = cmisc.get_n2_locals_and_globals(n=n)
+    self.tapp.shell.user_global_ns.update(g | locs)
+    self.tapp.start()
+    self.tapp = None
+
+
+g_ipython = IPythonHandler()
+
 class Env:
 
   def __init__(self):
@@ -34,14 +76,16 @@ class Env:
     self.rx_qt_sched = None
     self.jax_dump_dir = None
 
+
   def create_app(self, ctx=dict()):
     app = qt_imports.QApplication.instance()
     if app is None:
       # needs to be stored otherwise GCed
       self.app = qt_imports.QApplication(ctx.get('other_args', []))
     else:
-      assert self.app is not None # app should be created through g_env?
+      assert self.app is not None  # app should be created through g_env?
     return app
+
 
   @cmisc.cached_property
   def qt_sched(self):
@@ -63,17 +107,18 @@ class Env:
       self.get_qt_imports()
       self.loaded = 1
 
-  def run_magic(self, force=False):
-    if not self.ran_magic and (cmisc.is_interactive() or force):
+  def run_magic(self, force=False, force2=False):
+    if force2 or (not self.ran_magic and (g_ipython.in_jupyter or force)):
+
       self.ran_magic = 1
       magic_name = ['qt4', 'qt5'][self.qt5]
       print('Runnign magic', magic_name)
       self.create_app()
       try:
-        get_ipython().run_line_magic('gui', magic_name)
-      except:
-        pass
-      print('done')
+        g_ipython.get_ipython().run_line_magic('gui', magic_name)
+      except Exception as  e:
+        glog.exception(e)
+
 
   def get_qt_imports(self):
 

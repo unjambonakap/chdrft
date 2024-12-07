@@ -194,8 +194,7 @@ def jupyter_print(x):
   print(cmisc.json_dumps(x))
 
 
-@contextlib.contextmanager
-def configure_joy(gp: OGamepad, mp, init_dict={}):
+def configure_joy(gp: OGamepad | None, mp, init_dict={}):
   cur = SceneControllerInput()
 
   def proc(tb):
@@ -216,12 +215,19 @@ def configure_joy(gp: OGamepad, mp, init_dict={}):
   cur.inputs.update(init_dict)
 
   state= ImageIO(proc, last=cur)
-  gp.state_src.connect_to(state)
-  gp.start()
-  try:
-    yield state
-  finally:
-    gp.dispose()
+
+  @contextlib.contextmanager
+  def context_func():
+    if gp is not None:
+      gp.state_src.connect_to(state)
+      gp.start()
+    try:
+      yield state
+    finally:
+      if gp is not None:
+        gp.dispose()
+
+  return cmisc.ContextObj(state, context_func())
 
 def debug_controller_state(state: ImageIO, cb_ser=lambda x: cmisc.json_dumps(x.inputs)):
   import rich.live, rich.json

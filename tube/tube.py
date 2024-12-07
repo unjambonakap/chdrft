@@ -224,14 +224,17 @@ class Tube(ExitStack):
     self.running = False
     self.buf = b''
 
-  def _recv_ready(self, fd, timeout):
+  def _recv_ready(self, fd, timeout: misc.Timeout):
     if timeout is None:
       return select.select([fd], [], []) == ([fd], [], [])
     else:
-      res =  select.select([fd], [], [], timeout.get_sec()) == \
-                ([fd], [], [])
-      if not res:
-        self._raise_timeout()
+      while True:
+        res =  select.select([fd], [], [], timeout.get_sec()) == ([fd], [], [])
+        if res:
+          return res
+        timeout.raise_if_expired()
+
+
 
 
   def interactive(self, use_input=True, full_print=0, outfile=None, stop_msg=b'KAPPAQUIT'):

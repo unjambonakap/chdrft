@@ -9,13 +9,12 @@ import re
 
 from chdrft.cmds import CmdsList
 from chdrft.main import app
-from chdrft.struct.base import Range2D
 from chdrft.struct.base import Range1D, Range2D
 from chdrft.utils.cmdify import ActionHandler
-from chdrft.utils.cmdify import ActionHandler
 from chdrft.utils.misc import Attributize
-from chdrft.utils.misc import Attributize
+import chdrft.utils.misc as cmisc
 from chdrft.utils.opa_types import *
+from chdrft.utils.rx_helpers import WrapRX
 from numpy._typing import (_8Bit, _16Bit, _32Bit, _64Bit)
 import shapely.geometry
 
@@ -165,7 +164,6 @@ class Dataset:
       x=None,
       xy=None,
       samp_rate=None,
-      sig_replot_cb=None,
       orig_dataset=None,
       name='',
       offset=None,
@@ -178,7 +176,7 @@ class Dataset:
         y = xy[:, 1]
     self.offset = offset
     self.y = y
-    self.sig_replot_cb = sig_replot_cb
+    self.pub_data_changed = WrapRX.Subject()
     if not samp_rate:
       samp_rate = None
 
@@ -230,6 +228,13 @@ class Dataset:
     self.x = np.linspace(shift, (self.n - 1) / self.samp_rate + shift, self.n)
     assert len(self.x) == self.n
     return self
+
+
+  @property
+  def xlast(self) -> float | None:
+    if len(self.x) == 0:
+      return None
+    return self.x[-1]
 
   @property
   def xy(self):
@@ -460,15 +465,22 @@ class Dataset:
 
 class DynamicDataset(Dataset):
 
-  def __init__(self, y, **kwargs):
+  def __init__(self, y, manual_notify_change: bool = False, **kwargs):
+    self.manual_notify_change = manual_notify_change
     super().__init__(y, **kwargs)
+
+
+  def notify_change(self):
+      self.pub_data_changed.on_next(None)
 
   def update_data(self, nx, ny):
     n = len(nx)
     assert n == len(ny)
     self.x = np.append(self.x, nx)
     self.y = np.append(self.y, ny)
-    self.sig_replot_cb()
+    if not self.manual_notify_change:
+      self.notify_change()
+
 
 
 

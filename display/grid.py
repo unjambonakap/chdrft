@@ -1,5 +1,6 @@
 #!/usr/bin/env python
 
+from __future__ import annotations
 from chdrft.cmds import CmdsList
 from chdrft.main import app
 from chdrft.utils.cmdify import ActionHandler
@@ -9,14 +10,12 @@ import chdrft.utils.misc as cmisc
 import math
 import numpy as np
 from enum import Enum
-from chdrft.struct.base import Box
+from chdrft.struct.base import Box, g_unit_box
 import reactivex as rx
 from chdrft.config.env import g_env
 
 import PyQt5.QtWidgets as QtWidgets
-from PyQt5.QtWidgets import (
-    QMainWindow, QWidget, QGridLayout
-)
+from PyQt5.QtWidgets import (QMainWindow, QWidget, QGridLayout)
 import PyQt5.QtCore as QtCore
 import PyQt5.QtGui as QtGui
 from chdrft.display.ui import PlotManager, OpaPlot
@@ -39,20 +38,35 @@ def qt2py(v):
   return v
 
 
+class PlotTypesEnum(Enum):
+  Graph = 'graph'
+  Vispy = 'vispy'
+  Fig = 'fig'
+  Metric = 'metric'
+
 
 class GridPlacerPolicy(Enum):
   Dispatch = 'dispatch'
   Normal = 'normal'
 
+
+class GridEntry(cmisc.PatchedModel):
+  change_req: object = None
+  w: QWidget
+  box: Box | None = None
+  label: str | None
+  type: PlotTypesEnum
+
+
 class GridPlacer:
   kMoveDrag = 'move'
   kSizeDrag = 'size'
 
-  def __init__(self, dc, w, size=(1, 1), policy=GridPlacerPolicy.Dispatch):
+  def __init__(self, dc: DragContext, w: GridWidget, size=(1, 1), policy=GridPlacerPolicy.Dispatch):
     self.w = w
     self.policy = policy
     self.grid_box = Box.FromSize(size, is_int=1)
-    self.zorder = []
+    self.zorder: list[GridEntry] = []
     self.w2e = A.MakeId()
     self.box = Box.FromSize((800, 600), is_int=1)
     self.dc = dc
@@ -114,16 +128,16 @@ class GridPlacer:
       self.update(e)
     self.w.update()
 
-  def change_req(self, e, box=None, pos=None, size=None):
+  def change_req(self, ge: GridEntry, box=None, pos=None, size=None):
     if pos is None:
-      pos = e.box.low
+      pos = ge.box.low
     if size is None:
-      size = e.box.size
+      size = ge.box.size
     if box is None:
       box = Box(low=pos, size=size, is_int=1)
     if not box.empty and self.grid_box.contains(box):
-      e.box = box
-      self.update(e)
+      ge.box = box
+      self.update(ge)
     return e
 
   def resize(self, newsize):
@@ -189,44 +203,42 @@ class GridPlacer:
       for pos in self.grid_box:
         cnd = box.make(dim=None, low=pos)
         if not self.covered(cnd): return cnd
-      self.resize_grid((1,1), double=0)
-
-  def make(self, widget, box=None, pos=None, size=None, label=None, **kwargs):
-    if box is None:
-      if size is None: size = (1, 1)
-      if pos is None: pos = (0, 0)
-      box = Box(low=pos, dim=size)
-      if self.policy == GridPlacerPolicy.Dispatch:
-        box = self.find_empty_place(box)
-
-
-    e = A(
-        w=widget,
-        box=box.to_int_round().intersection(self.grid_box),
-        gw=self,
-      label=label,
-    )
-    e.change_req = lambda **kwargs: self.change_req(e, **kwargs)
-    return e
+      self.resize_grid((1, 1), double=0)
 
 
   @property
-  def asq(self): return cmisc.asq_query(self.zorder)
+  def asq(self):
+    return cmisc.asq_query(self.zorder)
 
-  def find_by_label(self, label):
+  def find_by_label(self, label) -> GridEntry | None:
     if label is None: return None
     return self.asq.where(lambda x: x.label == label).first_or_default(None)
 
-  def place(self, widget, **kwargs):
-    e = self.make(widget, **kwargs)
-    e.update(kwargs)
-    self.zorder.insert(0, e)
-    self.w2e[widget] = e
-    self.update(e)
-    return e
+  def find(
+      self, type: PlotTypesEnum, label: str | None, attach_to_existing: bool
+  ) -> GridEntry | None:
+    if label is not None:
+      return self.find_by_label(label)
+    if not attach_to_existing: return None
+    return cmisc.single_or_none(self.asq.where(lambda x: x.type == type))
+
+  def place(self, ge: GridEntry):
+    #if box is None:
+    #  if size is None: size = (1, 1)
+    #  if pos is None: pos = (0, 0)
+    #  box = Box(low=pos, dim=size)
+    #  if self.policy == GridPlacerPolicy.Dispatch:
+    #  box = Box(low=pos, dim=size)
+    ge.box = self.find_empty_place(g_unit_box)
+
+    ge.change_req = cmisc.functools.partial(self.change_req, ge=ge)
+    self.zorder.insert(0, ge)
+    self.w2e[ge.w] = ge
+    self.update(ge)
 
   def remove_pos(self, pos):
     self.remove(e=self.get_first_hit(pos))
+
   def remove(self, w=None, e=None):
     if e is None and w is None: return
     if e is None: e = self.w2e[w]
@@ -250,11 +262,11 @@ class GridPlacer:
       pos = e.from_box_space(pos) / self.grid_box.size
     return self.box.from_space(pos)
 
-  def update(self, e):
-    nbox = self.box.from_box_space(e.box.to_double() / self.grid_box.size).to_int()
-    e.w.move(*nbox.low)
-    e.w.resize(*nbox.size)
-    e.w.update()
+  def update(self, ge: GridEntry):
+    nbox = self.box.from_box_space(ge.box.to_double() / self.grid_box.size).to_int()
+    ge.w.move(*nbox.low)
+    ge.w.resize(*nbox.size)
+    ge.w.update()
 
   def resize_grid(self, delta, double=1):
     used = Box.Union([e.box for e in self.zorder])
@@ -264,6 +276,9 @@ class GridPlacer:
       return
     self.grid_box = nbox
     self.update_all()
+
+
+GridEntry.update_forward_refs()
 
 
 class QtUtil:
@@ -375,13 +390,6 @@ class GridWidget(QWidget):
     self.setParent(parent)
     self.gp.setup(self.size)
 
-  def add(self, w, **kwargs):
-    w.setParent(self)
-    e = self.gp.place(w, **kwargs)
-    w.installEventFilter(self)
-    w.show()
-    return e
-
   def remove(self, w):
     self.gp.remove(w)
 
@@ -491,17 +499,20 @@ class MainWindow(QMainWindow):
     self.show()
 
 
-class GridWidgetHelper:
+class GridWidgetHelper(cmisc.PatchedModel):
+  gw: GridWidget
+  pm: PlotManager = None
+  win: MainWindow | None = None
 
   def __init__(self, gw=None, **kwargs):
+    win = None
     if gw is None:
       win = MainWindow()
       gw = GridWidget(**kwargs)
       win.setup(gw)
-      self.win = win
 
-    self.gw = gw
-    self.pm = PlotManager(A(w=self.gw, add=gw.add, remove=gw.remove))
+  #, pm=PlotManager(A(w=gw, add=gw.add, remove=gw.remove))
+    super().__init__(gw=gw, win=win)
 
   def create_plot(self, *args, **kwargs):
     plot = self.pm.create_plot(OpaPlot, *args, **kwargs)
@@ -509,6 +520,12 @@ class GridWidgetHelper:
 
   def remove_plot(self, plot):
     self.pm.remove_plot(plot)
+
+  def attach(self, ge: GridEntry):
+    ge.w.setParent(self.gw)
+    self.gw.gp.place(ge)
+    ge.w.installEventFilter(self.gw)
+    ge.w.show()
 
 
 class MetricStoreWidget(QWidget):
@@ -523,13 +540,17 @@ class MetricStoreWidget(QWidget):
   def get_by_w(self, w):
     return cmisc.firstor([x for x in self.children if x.w == w])
 
-  def add(self, w, label=None):
+  def add(self, w: MetricWidget | dict, label=None):
+    if not isinstance(w, MetricWidget):
+      w = MetricWidget.Make(**w)
+
     e = cmisc.A(w=w, label=None)
     self.children.append(e)
     self.update()
     return e
 
-  def asq(self): return cmisc.asq_query(self.children)
+  def asq(self):
+    return cmisc.asq_query(self.children)
 
   def find_by_label(self, label):
     if label is None: return None
@@ -559,14 +580,12 @@ class MetricStoreWidget(QWidget):
       self.layout.setColumnStretch(i, 1)
     super().update()
 
+
 def qt_dialog(parent, name, default='', typ=None):
-  res, ok = QtGui.QInputDialog.getText(parent, name, name,
-                                                    QtWidgets.QLineEdit.Normal,
-                                                    default)
+  res, ok = QtGui.QInputDialog.getText(parent, name, name, QtWidgets.QLineEdit.Normal, default)
   if not ok: return None
   if typ is not None: res = typ(res)
   return res
-
 
 
 def create_window(ctx):

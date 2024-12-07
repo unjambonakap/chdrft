@@ -834,19 +834,6 @@ class RBDescEntry(cmisc.PatchedModel):
   link_data: LinkData = cmisc.pyd_f(LinkData)
 
 
-class NameRegister(cmisc.PatchedModel):
-  obj2name: dict[typing.Any, str] = cmisc.pyd_f(dict)
-  name2cnt: dict[str, int] = cmisc.pyd_f(lambda: cmisc.defaultdict(int))
-
-  def register(self, obj, proposal: str) -> str:
-    num = self.name2cnt[proposal]
-    self.name2cnt[proposal] += 1
-    if num:
-      proposal = f'{proposal}_{num:03d}'
-      assert proposal not in self.name2cnt
-    self.obj2name[obj] = proposal
-    return proposal
-
 
 class RBBuilderAcc(cmisc.PatchedModel):
   entries: list[RBBuilderEntry] = cmisc.pyd_f(list)
@@ -952,12 +939,12 @@ class RBTree(cmisc.PatchedModel):
     if (par := cur.parent) is None: return 'root'
     children = self.entry2child[par]
 
-    names = NameRegister()
+    names = cmisc.NameRegister()
     for entry in children:
       cnd = entry.data.base_name
       if cnd == kDefaultName:
         cnd = f'{entry.link_data.spec.type}_{entry.spec.type}'
-      names.register(entry, cnd)
+      names.register(cnd, entry)
 
     return names.obj2name[cur]
 

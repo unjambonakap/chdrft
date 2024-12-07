@@ -172,6 +172,7 @@ class FileFormatHelper(ExitStack):
     x = Format(res)
     if self.mode == 'json': x = x.from_json()
     elif self.mode == 'yaml': x = x.from_yaml()
+    elif self.mode == 'attr_json': x = x.from_json().to_attr()
     elif self.mode == 'conf': x = x.from_conf()
     elif self.mode == 'csv': x = x.to_strio().from_csv(**self.params.conf)
     elif self.mode == 'txt': x = x
